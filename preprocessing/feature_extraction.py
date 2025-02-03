@@ -54,7 +54,7 @@ def extract_formants(audio_file_path, time_step=0.01, max_formants=5, max_freq=5
         print(f"Formant extraction error: {e}")
         return None
 
-def extract_f0_jitter(f0):
+def extract_jitter(f0):
     try:
         f0_clean = f0[f0 > 0]
         periods = 1 / f0_clean
