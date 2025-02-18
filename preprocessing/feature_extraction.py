@@ -42,16 +42,15 @@ def extract_formants(y, sr):
     except:
         return 0, 0, 0
 
-def extract_jitter(f0):
+def extract_jitter(f0, valid_indices):
     try:
-        f0_clean = f0[f0 > 0]
+        f0_clean = f0[valid_indices]
+        if f0_clean.size < 2:
+            return 0.0, 0.0  # 데이터가 부족하면 0 반환
+
         periods = 1 / f0_clean
         jitter_absolute = np.mean(np.abs(np.diff(periods)))
         jitter_relative = (jitter_absolute / np.mean(periods)) * 100
-        return jitter_absolute, jitter_relative
-    except Exception as e:
-        print(f"Jitter extraction error: {e}")
-        return None, None
-
-def extract_energy(y, sr, frame_length=2048, hop_length=512):
-    return librosa.feature.rms(y=y, frame_length=frame_length, hop_length=hop_length).flatten()
+        return jitter_absolute if jitter_absolute else 0.0, jitter_relative if jitter_relative else 0.0
+    except:
+        return 0.0, 0.0
