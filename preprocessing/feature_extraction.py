@@ -12,20 +12,23 @@ def extract_f0(y, sr, frame_period=5.0):
     except:
         return None, None, None
 
-def calculate_shimmer(y, sr, f0, time_stamps, frame_period=5.0):
+def extract_shimmer(y, sr, time_stamps, valid_indices):
     try:
-        valid_indices = f0 > 0
+        if not valid_indices.any():
+            return 0.0  # 무성음만 있으면 0 반환
+
         rms_amplitude = np.array([
-            np.sqrt(np.mean(y[int(max(0, (t - frame_period / 2000) * sr)):
-                               int(min(len(y), (t + frame_period / 2000) * sr))] ** 2))
+            np.sqrt(np.mean(y[max(0, int((t - 0.0025) * sr)):min(len(y), int((t + 0.0025) * sr))] ** 2))
             for t in time_stamps[valid_indices]
         ])
-        threshold = 0.001
-        shimmer_values = np.abs(np.diff(rms_amplitude)) / rms_amplitude[:-1]
-        return np.mean(shimmer_values[shimmer_values > threshold]) if len(shimmer_values) > 0 else 0.0
-    except Exception as e:
-        print(f"Shimmer error: {e}")
-        return None
+        
+        if rms_amplitude.size < 2:
+            return 0.0  # 데이터가 부족하면 0 반환
+
+        shimmer_values = np.abs(np.diff(rms_amplitude)) / (rms_amplitude[:-1] + 1e-6)  # 0 나누기 방지
+        return np.mean(shimmer_values) if shimmer_values.size > 0 else 0.0
+    except:
+        return 0.0
 
 def extract_mel_spectrogram(y, sr, n_fft=2048, hop_length=512, n_mels=128):
     mel_spectrogram = librosa.feature.melspectrogram(y=y, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels)
