@@ -30,9 +30,8 @@ def extract_shimmer(y, sr, time_stamps, valid_indices):
     except:
         return 0.0
 
-def extract_mel_spectrogram(y, sr, n_fft=2048, hop_length=512, n_mels=128):
-    mel_spectrogram = librosa.feature.melspectrogram(y=y, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels)
-    return librosa.power_to_db(mel_spectrogram, ref=np.max)
+def extract_mel_spectrogram(y, sr):
+    return librosa.power_to_db(librosa.feature.melspectrogram(y=y, sr=sr, n_fft=2048, hop_length=160, n_mels=128), ref=np.max)
 
 def extract_formants(audio_file_path, time_step=0.01, max_formants=5, max_freq=5500):
     try:
