@@ -33,20 +33,14 @@ def extract_shimmer(y, sr, time_stamps, valid_indices):
 def extract_mel_spectrogram(y, sr):
     return librosa.power_to_db(librosa.feature.melspectrogram(y=y, sr=sr, n_fft=2048, hop_length=160, n_mels=128), ref=np.max)
 
-def extract_formants(audio_file_path, time_step=0.01, max_formants=5, max_freq=5500):
+def extract_formants(y, sr):
     try:
-        sound = parselmouth.Sound(audio_file_path)
-        formant = sound.to_formant_burg(time_step=time_step, max_number_of_formants=max_formants, maximum_formant=max_freq)
-        times = np.linspace(formant.xmin, formant.xmax, int((formant.xmax - formant.xmin) / time_step) + 1)
-        return np.array([
-            (t, formant.get_value_at_time(1, t) or 0,
-             formant.get_value_at_time(2, t) or 0,
-             formant.get_value_at_time(3, t) or 0)
-            for t in times
-        ], dtype=np.float32)
-    except Exception as e:
-        print(f"Formant extraction error: {e}")
-        return None
+        sound = parselmouth.Sound(y)
+        formant = sound.to_formant_burg()
+        mid_time = np.median(np.linspace(0, formant.xmax, num=10))  # 중앙값 개선
+        return (formant.get_value_at_time(i, mid_time) or 0 for i in range(1, 4))
+    except:
+        return 0, 0, 0
 
 def extract_jitter(f0):
     try:
