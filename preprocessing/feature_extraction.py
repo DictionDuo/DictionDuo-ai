@@ -1,24 +1,16 @@
 import librosa
-import librosa.display
 import numpy as np
 import pyworld
 import parselmouth
-import matplotlib.pyplot as plt
-
-def load_audio(audio_file_path):
-    """Load an audio file and return waveform (y) and sample rate (sr)"""
-    try:
-        y, sr = librosa.load(audio_file_path, sr=None)
-        return y.astype(np.float64), sr
-    except Exception as e:
-        print(f"Error loading audio: {e}")
-        return None, None
 
 def extract_f0(y, sr, frame_period=5.0):
-    """Extract F0 and timestamps using pyworld"""
-    f0, time_stamps = pyworld.dio(y, sr, frame_period=frame_period)
-    f0 = pyworld.stonemask(y, f0, time_stamps, sr)
-    return f0, time_stamps
+    try:
+        f0, time_stamps = pyworld.dio(y, sr, frame_period=frame_period)
+        f0 = pyworld.stonemask(y, f0, time_stamps, sr)
+        valid_indices = f0 > 0  # 무성음 제거
+        return f0, time_stamps, valid_indices
+    except:
+        return None, None, None
 
 def calculate_shimmer(y, sr, f0, time_stamps, frame_period=5.0):
     try:
