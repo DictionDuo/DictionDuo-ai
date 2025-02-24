@@ -39,4 +39,8 @@ def create_feature_dataframe(wav_path):
         "jitter_relative": np.repeat(jitter_relative, mel_frames),
     })
 
+    # Mel Spectrogram을 데이터프레임에 추가
+    mel_spectrogram_df = pd.DataFrame(mel_spectrogram.T)
+    df = pd.concat([df, mel_spectrogram_df], axis=1)
+
     return df
