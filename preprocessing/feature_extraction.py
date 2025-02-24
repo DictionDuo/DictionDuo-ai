@@ -3,6 +3,14 @@ import numpy as np
 import pyworld
 import parselmouth
 
+def load_audio(audio_file_path):
+    """오디오 파일 로드"""
+    try:
+        y, sr = librosa.load(audio_file_path, sr=16000)
+        return y.astype(np.float64), sr
+    except:
+        return None, None
+    
 def extract_f0(y, sr, frame_period=5.0):
     try:
         f0, time_stamps = pyworld.dio(y, sr, frame_period=frame_period)
