@@ -52,7 +52,7 @@ class Conformer(nn.Module):
     def __init__(
             self,
             num_classes: int,
-            input_dim: int = 80,
+            input_dim: int = 136,
             encoder_dim: int = 512,
             num_encoder_layers: int = 17,
             num_attention_heads: int = 8,

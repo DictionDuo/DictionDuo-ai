@@ -138,7 +138,7 @@ class ConformerEncoder(nn.Module):
     """
     def __init__(
             self,
-            input_dim: int = 80,
+            input_dim: int = 136,
             encoder_dim: int = 512,
             num_layers: int = 17,
             num_attention_heads: int = 8,
