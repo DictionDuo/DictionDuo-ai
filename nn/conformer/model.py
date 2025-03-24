@@ -24,11 +24,10 @@ from .modules import Linear
 class Conformer(nn.Module):
     """
     Conformer: Convolution-augmented Transformer for Speech Recognition
-    The paper used a one-lstm Transducer decoder, currently still only implemented
-    the conformer encoder shown in the paper.
+    The paper used a one-lstm Transducer decoder.
 
     Args:
-        num_classes (int): Number of classification classes
+        output_dim (int): Dimension of the output mel spectrogram (default: 128)
         input_dim (int, optional): Dimension of input vector
         encoder_dim (int, optional): Dimension of conformer encoder
         num_encoder_layers (int, optional): Number of conformer blocks
@@ -51,7 +50,7 @@ class Conformer(nn.Module):
     """
     def __init__(
             self,
-            num_classes: int,
+            output_dim: int = 128,
             input_dim: int = 136,
             encoder_dim: int = 512,
             num_encoder_layers: int = 17,
@@ -80,7 +79,7 @@ class Conformer(nn.Module):
             conv_kernel_size=conv_kernel_size,
             half_step_residual=half_step_residual,
         )
-        self.fc = Linear(encoder_dim, num_classes, bias=False)
+        self.fc = Linear(encoder_dim, output_dim, bias=False)
 
     def count_parameters(self) -> int:
         """ Count parameters of encoder """
@@ -92,17 +91,17 @@ class Conformer(nn.Module):
 
     def forward(self, inputs: Tensor, input_lengths: Tensor) -> Tuple[Tensor, Tensor]:
         """
-        Forward propagate a `inputs` and `targets` pair for training.
+        Forward propagate a `inputs` tensor through the model.
 
         Args:
-            inputs (torch.FloatTensor): A input sequence passed to encoder. Typically for inputs this will be a padded
-                `FloatTensor` of size ``(batch, seq_length, dimension)``.
-            input_lengths (torch.LongTensor): The length of input tensor. ``(batch)``
+        inputs (torch.FloatTensor): Input sequence passed to the encoder. 
+            This should be a padded `FloatTensor` of size ``(batch, seq_length, dimension)``.
+        input_lengths (torch.LongTensor): The lengths of input sequences in the batch. ``(batch)``
 
         Returns:
-            * predictions (torch.FloatTensor): Result of model predictions.
+        * mel_outputs (torch.FloatTensor): Generated mel spectrogram output.
+        * encoder_output_lengths (torch.LongTensor): The length of encoder outputs.
         """
         encoder_outputs, encoder_output_lengths = self.encoder(inputs, input_lengths)
-        outputs = self.fc(encoder_outputs)
-        outputs = nn.functional.log_softmax(outputs, dim=-1)
-        return outputs, encoder_output_lengths
+        mel_outputs = self.fc(encoder_outputs)
+        return mel_outputs, encoder_output_lengths
