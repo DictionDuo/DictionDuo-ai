@@ -15,38 +15,38 @@
 import torch.nn as nn
 from torch import Tensor
 from typing import Tuple
+import torch.nn.init as init
 
-from kospeech.models.modules import Linear
+
+class Linear(nn.Module):
+    """
+    Wrapper class of torch.nn.Linear
+    Weight initialize by xavier initialization and bias initialize to zeros.
+    """
+    def __init__(self, in_features: int, out_features: int, bias: bool = True) -> None:
+        super(Linear, self).__init__()
+        self.linear = nn.Linear(in_features, out_features, bias=bias)
+        init.xavier_uniform_(self.linear.weight)
+        if bias:
+            init.zeros_(self.linear.bias)
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.linear(x)
 
 
 class DecoderRNNT(nn.Module):
     """
     Decoder of RNN-Transducer
 
-    Args:
-        num_classes (int): number of classification
-        hidden_state_dim (int, optional): hidden state dimension of decoder (default: 512)
-        output_dim (int, optional): output dimension of encoder and decoder (default: 512)
-        num_layers (int, optional): number of decoder layers (default: 1)
-        rnn_type (str, optional): type of rnn cell (default: lstm)
-        sos_id (int, optional): start of sentence identification
-        eos_id (int, optional): end of sentence identification
-        dropout_p (float, optional): dropout probability of decoder
-
-    Inputs: inputs, input_lengths
-        inputs (torch.LongTensor): A target sequence passed to decoder. `IntTensor` of size ``(batch, seq_length)``
-        input_lengths (torch.LongTensor): The length of input tensor. ``(batch)``
-        hidden_states (torch.FloatTensor): A previous hidden state of decoder. `FloatTensor` of size
-            ``(batch, seq_length, dimension)``
-
-    Returns:
-        (Tensor, Tensor):
-
-        * decoder_outputs (torch.FloatTensor): A output sequence of decoder. `FloatTensor` of size
-            ``(batch, seq_length, dimension)``
-        * hidden_states (torch.FloatTensor): A hidden state of decoder. `FloatTensor` of size
-            ``(batch, seq_length, dimension)``
+        Args:
+        input_size (int, optional): Input feature dimension (default: 136)
+        hidden_size (int, optional): Hidden state dimension of decoder (default: 512)
+        output_dim (int, optional): Output dimension of the decoder (default: 128)
+        num_layers (int, optional): Number of decoder layers (default: 1)
+        rnn_type (str, optional): Type of RNN cell (default: 'lstm')
+        dropout_p (float, optional): Dropout probability of the decoder (default: 0.2)
     """
+
     supported_rnns = {
         'lstm': nn.LSTM,
         'gru': nn.GRU,
@@ -55,38 +55,34 @@ class DecoderRNNT(nn.Module):
 
     def __init__(
             self,
-            num_classes: int,
-            hidden_state_dim: int,
-            output_dim: int,
-            num_layers: int,
+            input_size: int = 136,
+            hidden_size: int = 512,
+            output_dim: int = 128,
+            num_layers: int = 1,
             rnn_type: str = 'lstm',
-            sos_id: int = 1,
-            eos_id: int = 2,
             dropout_p: float = 0.2,
     ):
         super(DecoderRNNT, self).__init__()
-        self.hidden_state_dim = hidden_state_dim
-        self.sos_id = sos_id
-        self.eos_id = eos_id
-        self.embedding = nn.Embedding(num_classes, hidden_state_dim)
+        self.hidden_size = hidden_size
+
         rnn_cell = self.supported_rnns[rnn_type.lower()]
         self.rnn = rnn_cell(
-            input_size=hidden_state_dim,
-            hidden_size=hidden_state_dim,
+            input_size=input_size,
+            hidden_size=hidden_size,
             num_layers=num_layers,
             bias=True,
             batch_first=True,
             dropout=dropout_p,
             bidirectional=False,
         )
-        self.out_proj = Linear(hidden_state_dim, output_dim)
+        self.out_proj = Linear(hidden_size, output_dim)
 
     def count_parameters(self) -> int:
-        """ Count parameters of encoder """
-        return sum([p.numel for p in self.parameters()])
+        """ Count parameters of decoder """
+        return sum([p.numel() for p in self.parameters()])
 
     def update_dropout(self, dropout_p: float) -> None:
-        """ Update dropout probability of encoder """
+        """ Update dropout probability of decoder """
         for name, child in self.named_children():
             if isinstance(child, nn.Dropout):
                 child.p = dropout_p
@@ -98,10 +94,10 @@ class DecoderRNNT(nn.Module):
             hidden_states: Tensor = None,
     ) -> Tuple[Tensor, Tensor]:
         """
-        Forward propage a `inputs` (targets) for training.
+        Forward propagate a `inputs` (targets) for training.
 
         Args:
-            inputs (torch.LongTensor): A target sequence passed to decoder. `IntTensor` of size ``(batch, seq_length)``
+            inputs (torch.FloatTensor): A sequence of previous acoustic features. FloatTensor of shape (batch, seq_length, input_size)
             input_lengths (torch.LongTensor): The length of input tensor. ``(batch)``
             hidden_states (torch.FloatTensor): A previous hidden state of decoder. `FloatTensor` of size
                 ``(batch, seq_length, dimension)``
@@ -114,15 +110,15 @@ class DecoderRNNT(nn.Module):
             * hidden_states (torch.FloatTensor): A hidden state of decoder. `FloatTensor` of size
                 ``(batch, seq_length, dimension)``
         """
-        embedded = self.embedding(inputs)
+        rnn_inputs = inputs
 
         if input_lengths is not None:
-            embedded = nn.utils.rnn.pack_padded_sequence(embedded.transpose(0, 1), input_lengths.cpu())
-            outputs, hidden_states = self.rnn(embedded, hidden_states)
-            outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs)
-            outputs = self.out_proj(outputs.transpose(0, 1))
+            rnn_inputs = nn.utils.rnn.pack_padded_sequence(rnn_inputs, input_lengths.cpu(), batch_first=True)
+            outputs, hidden_states = self.rnn(rnn_inputs, hidden_states)
+            outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs, batch_first=True)
+            outputs = self.out_proj(outputs)
         else:
-            outputs, hidden_states = self.rnn(embedded, hidden_states)
+            outputs, hidden_states = self.rnn(rnn_inputs, hidden_states)
             outputs = self.out_proj(outputs)
 
         return outputs, hidden_states
