@@ -68,6 +68,7 @@ class RelativeMultiHeadAttention(nn.Module):
         torch.nn.init.xavier_uniform_(self.v_bias)
 
         self.out_proj = Linear(d_model, d_model)
+        self.mel_proj = Linear(d_model, 128)
 
     def forward(
             self,
@@ -94,21 +95,18 @@ class RelativeMultiHeadAttention(nn.Module):
             mask = mask.unsqueeze(1)
             score.masked_fill_(mask, -1e9)
 
-        attn = F.softmax(score, -1)
-        attn = self.dropout(attn)
+        attn = self.dropout(score)
 
         context = torch.matmul(attn, value).transpose(1, 2)
         context = context.contiguous().view(batch_size, -1, self.d_model)
 
-        return self.out_proj(context)
+        outputs = self.out_proj(context)
+        outputs = self.mel_proj(outputs)
+
+        return outputs
 
     def _relative_shift(self, pos_score: Tensor) -> Tensor:
         batch_size, num_heads, seq_length1, seq_length2 = pos_score.size()
-        zeros = pos_score.new_zeros(batch_size, num_heads, seq_length1, 1)
-        padded_pos_score = torch.cat([zeros, pos_score], dim=-1)
-
-        padded_pos_score = padded_pos_score.view(batch_size, num_heads, seq_length2 + 1, seq_length1)
-        pos_score = padded_pos_score[:, :, 1:].view_as(pos_score)[:, :, :, : seq_length2 // 2 + 1]
 
         return pos_score
 
@@ -136,8 +134,8 @@ class MultiHeadedSelfAttentionModule(nn.Module):
     def __init__(self, d_model: int, num_heads: int, dropout_p: float = 0.1):
         super(MultiHeadedSelfAttentionModule, self).__init__()
         self.positional_encoding = RelPositionalEncoding(d_model)
-        self.layer_norm = nn.LayerNorm(d_model)
         self.attention = RelativeMultiHeadAttention(d_model, num_heads, dropout_p)
+        self.layer_norm = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(p=dropout_p)
 
     def forward(self, inputs: Tensor, mask: Optional[Tensor] = None):
@@ -145,7 +143,7 @@ class MultiHeadedSelfAttentionModule(nn.Module):
         pos_embedding = self.positional_encoding(inputs)
         pos_embedding = pos_embedding.repeat(batch_size, 1, 1)
 
-        inputs = self.layer_norm(inputs)
         outputs = self.attention(inputs, inputs, inputs, pos_embedding=pos_embedding, mask=mask)
+        outputs = self.layer_norm(outputs)
 
         return self.dropout(outputs)
