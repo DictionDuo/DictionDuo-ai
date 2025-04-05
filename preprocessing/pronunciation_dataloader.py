@@ -2,23 +2,26 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import preprocessing.feature_extraction as fx  # feature_extraction.py 전체 사용
 import numpy as np
-import os
 
 # 자동으로 GPU 사용 여부 확인
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class PronunciationDataset(Dataset):
-    def __init__(self, audio_files, max_length):
-        self.audio_files = audio_files
+    def __init__(self, audio_file_pairs, max_length):
+        """
+        audio_file_pairs: List of (input_audio_path, target_audio_path) tuples
+        """
+        self.audio_file_pairs = audio_file_pairs
         self.max_length = max_length
-    
+
     def pad_or_truncate(self, features):
         if features is None:  # None 값 처리
             return np.zeros((self.max_length, 1))  # 기본적으로 (max_length, 1) 형태로 반환
 
-        length = features.shape[0]
         if len(features.shape) == 1:  # 1차원 배열이면 (T,1)로 변환
             features = features[:, np.newaxis]  # (T,) → (T,1)
+
+        length = features.shape[0]
 
         if length > self.max_length:
             return features[:self.max_length]
@@ -35,53 +38,69 @@ class PronunciationDataset(Dataset):
         return np.interp(np.linspace(0, 1, target_length), np.linspace(0, 1, current_length), feature)
     
     def __len__(self):
-        return len(self.audio_files)
-    
+        return len(self.audio_file_pairs)
+
     def __getitem__(self, idx):
-        audio_path = self.audio_files[idx]
-        y, sr = fx.load_audio(audio_path)
-        
-        if y is None or sr is None:
-            return None  # 로딩 실패 시 None 반환
-        
+        input_path, target_path = self.audio_file_pairs[idx]
+
         try:
+            # 입력 음성 처리
+            y_in, sr_in = fx.load_audio(input_path)
+        
+            if y_in is None or sr_in is None:
+                return None  # 로딩 실패 시 None 반환
+        
             # 모든 피처 추출
-            mel_spectrogram = fx.extract_mel_spectrogram(y, sr)
-            f0, _ = fx.extract_f0(y, sr)
-            energy = fx.extract_energy(y, sr)
-            shimmer = fx.calculate_shimmer(y, sr, f0, _)
-            formants = fx.extract_formants(audio_path)
+            mel_spectrogram = fx.extract_mel_spectrogram(y_in, sr_in)
+            f0, _ = fx.extract_f0(y_in, sr_in)
+            shimmer = fx.extract_shimmer(y_in, sr_in, f0, _)
+            formants = fx.extract_formants(input_path)
             jitter_abs, jitter_rel = fx.extract_jitter(f0)
 
             # Mel Spectrogram 길이에 맞춰 다른 피처 크기 조정
             T_mel = mel_spectrogram.shape[0]
             f0 = self.resize_feature(f0, T_mel)[:, np.newaxis]
-            energy = self.resize_feature(energy, T_mel)[:, np.newaxis]
             jitter_abs = np.full((T_mel, 1), jitter_abs)
+            jitter_rel = np.full((T_mel, 1), jitter_rel)
             shimmer = np.full((T_mel, 1), shimmer)
             formants = self.resize_feature(formants, T_mel)
             
             # 패딩 적용 (모든 피처)
             mel_spectrogram = self.pad_or_truncate(mel_spectrogram)
             f0 = self.pad_or_truncate(f0)
-            energy = self.pad_or_truncate(energy)
             jitter_abs = self.pad_or_truncate(jitter_abs)
+            jitter_rel = self.pad_or_truncate(jitter_rel)
             shimmer = self.pad_or_truncate(shimmer)
             formants = self.pad_or_truncate(formants)
             
             # 텐서 변환 및 GPU 로드
-            mel_spectrogram = torch.tensor(mel_spectrogram, dtype=torch.float32).to(device)
-            f0 = torch.tensor(f0, dtype=torch.float32).to(device)
-            energy = torch.tensor(energy, dtype=torch.float32).to(device)
-            shimmer = torch.tensor(shimmer, dtype=torch.float32).to(device)
-            formants = torch.tensor(formants, dtype=torch.float32).to(device)
-            jitter_abs = torch.tensor(jitter_abs, dtype=torch.float32).to(device)
-            jitter_rel = torch.tensor(jitter_rel, dtype=torch.float32).to(device)
+            input_tensor = torch.cat([
+                torch.tensor(mel_spectrogram, dtype=torch.float32),
+                torch.tensor(f0, dtype=torch.float32),
+                torch.tensor(jitter_abs, dtype=torch.float32),
+                torch.tensor(jitter_rel, dtype=torch.float32),
+                torch.tensor(shimmer, dtype=torch.float32),
+                torch.tensor(formants, dtype=torch.float32)
+            ], dim=-1).to(device)
+
+            # 정답 음성 처리
+            y_tar, sr_tar = fx.load_audio(target_path)
+        
+            if y_tar is None or sr_tar is None:
+                return None  # 로딩 실패 시 None 반환
+
+            mel_spectrogram = fx.extract_mel_spectrogram(y_tar, sr_tar)
+
+            # 패딩 적용
+            mel_spectrogram = self.pad_or_truncate(mel_spectrogram)
             
-            return mel_spectrogram, f0, energy, shimmer, formants, jitter_abs, jitter_rel
+            # 텐서 변환 및 GPU 로드
+            target_tensor = torch.tensor(mel_spectrogram, dtype=torch.float32).to(device)
+            
+            return input_tensor, target_tensor
         
         except Exception as e:
-            print(f"Error processing file {audio_path}: {e}")
+            print(f"Error processing pair {input_path} / {target_path}: {e}")
             return None
 
 # DataLoader에서 None 값 필터링하는 collate_fn 추가
@@ -91,7 +110,7 @@ def collate_fn(batch):
         return None  # 모든 데이터가 None이면 DataLoader에서 처리
     return torch.utils.data.dataloader.default_collate(batch)
 
-def create_dataloader(audio_files, max_length, batch_size, shuffle=True):
-    dataset = PronunciationDataset(audio_files, max_length)
+def create_dataloader(audio_file_pairs, max_length, batch_size, shuffle=True):
+    dataset = PronunciationDataset(audio_file_pairs, max_length)
     dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=8, shuffle=shuffle, collate_fn=collate_fn)
     return dataloader
