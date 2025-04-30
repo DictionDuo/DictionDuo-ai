@@ -4,14 +4,14 @@ import numpy as np
 import librosa
 import json
 from preprocessing.feature_extraction import extract_features
+from preprocessing.build_dataset import build_metadata_list, get_max_lengths
 from utils.phoneme_utils import Korean
 
 class PhonemeDataset(Dataset):
-    def __init__(self, metadata_list, phoneme2index, max_mel_length, max_label_length):
-        self.metadata_list = metadata_list
+    def __init__(self, wav_dir, json_dir, phoneme2index):
+        self.metadata_list = build_metadata_list(wav_dir, json_dir)
         self.phoneme2index = phoneme2index
-        self.max_mel_length = max_mel_length
-        self.max_label_length = max_label_length
+        self.max_mel_length, self.max_label_length = get_max_lengths(self.metadata_list, phoneme2index)
 
     def __len__(self):
         return len(self.metadata_list)
@@ -26,7 +26,7 @@ class PhonemeDataset(Dataset):
     def pad_label(self, label_seq):
         if len(label_seq) < self.max_label_length:
             return label_seq + [0] * (self.max_label_length - len(label_seq))
-        return label_seq  # truncate 제거함
+        return label_seq
 
     def __getitem__(self, idx):
         meta = self.metadata_list[idx]
