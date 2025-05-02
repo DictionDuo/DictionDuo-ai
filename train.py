@@ -5,7 +5,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from conformer.model import Conformer
 from dataset.phoneme_dataset import PhonemeDataset
-from preprocessing.build_dataset import build_metadata_list, get_max_lengths
+from preprocessing.split_dataset import build_and_split
 from utils.phoneme_utils import phoneme2index
 from tqdm import tqdm
 from difflib import SequenceMatcher
@@ -88,8 +88,12 @@ def main(args):
 
     wav_dir = os.path.join(args.train_data, 'wav')
     json_dir = os.path.join(args.train_data, 'json')
-    dataset = PhonemeDataset(wav_dir, json_dir, phoneme2index)
-    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
+    train_list, val_list, _ = build_and_split(wav_dir, json_dir)
+
+    train_dataset = PhonemeDataset(train_list, phoneme2index)
+    val_dataset = PhonemeDataset(val_list, phoneme2index)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = Conformer(
@@ -103,8 +107,8 @@ def main(args):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
 
     for epoch in range(args.epochs):
-        avg_loss = train_one_epoch(model, loader, criterion, optimizer, device)
-        avg_per = evaluate(model, loader, phoneme2index, device)
+        avg_loss = train_one_epoch(model, train_loader, criterion, optimizer, device)
+        avg_per = evaluate(model, val_loader, phoneme2index, device)
         print(f"[Epoch {epoch+1}] Loss: {avg_loss:.4f} | PER: {avg_per*100:.2f}%")
 
     os.makedirs(args.model_dir, exist_ok=True)
