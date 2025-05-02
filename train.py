@@ -2,11 +2,11 @@ import os
 import argparse
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
 from conformer.model import Conformer
 from dataset.phoneme_dataset import PhonemeDataset
 from preprocessing.split_dataset import build_and_split
 from utils.phoneme_utils import phoneme2index
+from utils.seed import set_seed, get_data_loader
 from tqdm import tqdm
 from difflib import SequenceMatcher
 import json
@@ -83,6 +83,8 @@ def evaluate(model, loader, phoneme2index, device):
     return avg_per
 
 def main(args):
+    set_seed(args.seed)
+
     if args.download:
         download_from_s3(args.bucket_name, args.s3_folder, args.train_data)
 
@@ -92,8 +94,8 @@ def main(args):
 
     train_dataset = PhonemeDataset(train_list, phoneme2index)
     val_dataset = PhonemeDataset(val_list, phoneme2index)
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
+    train_loader = get_data_loader(train_dataset, batch_size=args.batch_size, shuffle=True, seed=args.seed)
+    val_loader = get_data_loader(val_dataset, batch_size=args.batch_size, shuffle=False, seed=args.seed)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = Conformer(
@@ -119,6 +121,7 @@ if __name__ == "__main__":
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--learning_rate', type=float, default=1e-4)
     parser.add_argument('--batch_size', type=int, default=4)
+    parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--train_data', type=str, default=os.environ.get('SM_CHANNEL_TRAIN', '/opt/ml/input/data/train'))
     parser.add_argument('--model_dir', type=str, default=os.environ.get('SM_MODEL_DIR', '/opt/ml/model'))
     parser.add_argument('--download', action='store_true')
