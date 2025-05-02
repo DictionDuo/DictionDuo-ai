@@ -4,12 +4,12 @@ import numpy as np
 import librosa
 import json
 from preprocessing.feature_extraction import extract_features
-from preprocessing.build_dataset import build_metadata_list, get_max_lengths
+from preprocessing.build_dataset import get_max_lengths
 from utils.phoneme_utils import Korean
 
 class PhonemeDataset(Dataset):
-    def __init__(self, wav_dir, json_dir, phoneme2index):
-        self.metadata_list = build_metadata_list(wav_dir, json_dir)
+    def __init__(self, metadata_list, phoneme2index):
+        self.metadata_list = metadata_list
         self.phoneme2index = phoneme2index
         self.max_mel_length, self.max_label_length = get_max_lengths(self.metadata_list, phoneme2index)
 
