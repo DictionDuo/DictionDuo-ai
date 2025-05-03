@@ -7,6 +7,7 @@ from dataset.phoneme_dataset import PhonemeDataset
 from preprocessing.split_dataset import build_and_split
 from utils.phoneme_utils import phoneme2index
 from utils.seed import set_seed, get_data_loader
+from utils.logger import setup_logger
 from tqdm import tqdm
 from difflib import SequenceMatcher
 import json
@@ -31,7 +32,7 @@ def calculate_per(pred_seq, label_seq):
     errors = total - matches
     return errors / total if total > 0 else 0
 
-def train_one_epoch(model, loader, criterion, optimizer, device):
+def train_one_epoch(model, loader, criterion, optimizer, device, logger):
     model.train()
     total_loss = 0.0
 
@@ -52,9 +53,10 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
         total_loss += loss.item()
 
     avg_loss = total_loss / len(loader)
+    logger.info(f"Train Loss: {avg_loss:.4f}")
     return avg_loss
 
-def evaluate(model, loader, phoneme2index, device):
+def evaluate(model, loader, phoneme2index, device, logger):
     model.eval()
     total_per = 0.0
     total_samples = 0
@@ -80,10 +82,15 @@ def evaluate(model, loader, phoneme2index, device):
                 total_samples += 1
 
     avg_per = total_per / total_samples if total_samples > 0 else 0
+    logger.info(f"Validation PER: {avg_per:.2%}")
     return avg_per
 
 def main(args):
     set_seed(args.seed)
+
+    logger = setup_logger(os.path.join(args.model_dir, 'train.log'))
+    logger.info("===== Training Started =====")
+    logger.info(f"Epochs: {args.epochs}, LR: {args.learning_rate}, Batch: {args.batch_size}, Seed: {args.seed}")
 
     if args.download:
         download_from_s3(args.bucket_name, args.s3_folder, args.train_data)
@@ -109,12 +116,15 @@ def main(args):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
 
     for epoch in range(args.epochs):
-        avg_loss = train_one_epoch(model, train_loader, criterion, optimizer, device)
-        avg_per = evaluate(model, val_loader, phoneme2index, device)
-        print(f"[Epoch {epoch+1}] Loss: {avg_loss:.4f} | PER: {avg_per*100:.2f}%")
+        logger.info(f"--- Epoch {epoch+1}/{args.epochs} ---")
+        avg_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, logger)
+        avg_per = evaluate(model, val_loader, phoneme2index, device, logger)
 
     os.makedirs(args.model_dir, exist_ok=True)
-    torch.save(model.state_dict(), os.path.join(args.model_dir, 'conformer.pt'))
+    model_path = os.path.join(args.model_dir, 'conformer.pt')
+    torch.save(model.state_dict(), model_path)
+    logger.info(f"Model saved to {model_path}")
+    logger.info("===== Training Completed =====")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
