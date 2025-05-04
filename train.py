@@ -56,14 +56,14 @@ def train_one_epoch(model, loader, criterion, optimizer, device, logger):
     logger.info(f"Train Loss: {avg_loss:.4f}")
     return avg_loss
 
-def evaluate(model, loader, phoneme2index, device, logger):
+def evaluate(model, loader, phoneme2index, device, logger, stage="Validation"):
     model.eval()
     total_per = 0.0
     total_samples = 0
     index2phoneme = {v: k for k, v in phoneme2index.items()}
 
     with torch.no_grad():
-        for features, labels in tqdm(loader, desc="Evaluating"):
+        for features, labels in tqdm(loader, desc="Evaluating {stage}"):
             input_lengths = torch.full((features.size(0),), features.size(1), dtype=torch.long)
             label_lengths = torch.sum(labels != 0, dim=1)
 
@@ -82,7 +82,7 @@ def evaluate(model, loader, phoneme2index, device, logger):
                 total_samples += 1
 
     avg_per = total_per / total_samples if total_samples > 0 else 0
-    logger.info(f"Validation PER: {avg_per:.2%}")
+    logger.info(f"{stage} PER: {avg_per:.2%}")
     return avg_per
 
 def main(args):
@@ -97,12 +97,15 @@ def main(args):
 
     wav_dir = os.path.join(args.train_data, 'wav')
     json_dir = os.path.join(args.train_data, 'json')
-    train_list, val_list, _ = build_and_split(wav_dir, json_dir)
+    train_list, val_list, test_list = build_and_split(wav_dir, json_dir)
 
     train_dataset = PhonemeDataset(train_list, phoneme2index)
     val_dataset = PhonemeDataset(val_list, phoneme2index)
+    test_dataset = PhonemeDataset(test_list, phoneme2index)
+
     train_loader = get_data_loader(train_dataset, batch_size=args.batch_size, shuffle=True, seed=args.seed)
     val_loader = get_data_loader(val_dataset, batch_size=args.batch_size, shuffle=False, seed=args.seed)
+    test_loader = get_data_loader(test_dataset, batch_size=args.batch_size, shuffle=False, seed=args.seed)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = Conformer(
@@ -118,13 +121,16 @@ def main(args):
     for epoch in range(args.epochs):
         logger.info(f"--- Epoch {epoch+1}/{args.epochs} ---")
         avg_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, logger)
-        avg_per = evaluate(model, val_loader, phoneme2index, device, logger)
+        avg_per = evaluate(model, val_loader, phoneme2index, device, logger, stage="Validation")
 
     os.makedirs(args.model_dir, exist_ok=True)
     model_path = os.path.join(args.model_dir, 'conformer.pt')
     torch.save(model.state_dict(), model_path)
     logger.info(f"Model saved to {model_path}")
-    logger.info("===== Training Completed =====")
+
+    logger.info("===== Running Final Test Evaluation =====")
+    evaluate(model, test_loader, phoneme2index, device, logger, stage="Test")
+    logger.info("===== Training + Evaluation Completed =====")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
