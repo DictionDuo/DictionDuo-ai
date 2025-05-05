@@ -1,0 +1,14 @@
+{
+    "epochs": 20,
+    "learning_rate": 3e-4,
+    "batch_size": 32,
+    "seed": 42,
+    "train_data": "/opt/ml/input/data/train",
+    "model_dir": "/opt/ml/model",
+    "download": true,
+    "bucket_name": "dictionduo-bucket",
+    "s3_folder": "dataset/",
+    "upload_model": true,
+    "upload_bucket": "dictionduo-bucket",
+    "upload_path": "model/"
+  }
