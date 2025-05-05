@@ -2,6 +2,7 @@ import os
 import argparse
 import torch
 import torch.nn as nn
+from datetime import datetime
 from conformer.model import Conformer
 from dataset.phoneme_dataset import PhonemeDataset
 from preprocessing.split_dataset import build_and_split
@@ -24,6 +25,10 @@ def download_from_s3(bucket_name, s3_folder, local_dir):
             local_file_path = os.path.join(local_dir, os.path.relpath(key, s3_folder))
             os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
             s3.download_file(bucket_name, key, local_file_path)
+
+def upload_to_s3(file_path, bucket_name, upload_path):
+    s3 = boto3.client('s3')
+    s3.upload_file(file_path, bucket_name, upload_path)
 
 def calculate_per(pred_seq, label_seq):
     matcher = SequenceMatcher(None, pred_seq, label_seq)
@@ -124,9 +129,15 @@ def main(args):
         avg_per = evaluate(model, val_loader, phoneme2index, device, logger, stage="Validation")
 
     os.makedirs(args.model_dir, exist_ok=True)
-    model_path = os.path.join(args.model_dir, 'conformer.pt')
+    now = datetime.now().strftime("%Y%m%d_%H%M%S")
+    model_name = f"conformer_{now}.pt"
+    model_path = os.path.join(args.model_dir, model_name)
     torch.save(model.state_dict(), model_path)
     logger.info(f"Model saved to {model_path}")
+
+    if getattr(args, 'upload_model', False):
+        upload_to_s3(model_path, args.upload_bucket, args.upload_path)
+        logger.info(f"Uploaded to s3://{args.upload_bucket}/{args.upload_path}")
 
     logger.info("===== Running Final Test Evaluation =====")
     evaluate(model, test_loader, phoneme2index, device, logger, stage="Test")
@@ -143,6 +154,9 @@ if __name__ == "__main__":
     parser.add_argument('--download', action='store_true')
     parser.add_argument('--bucket_name', type=str, default='your-bucket-name')
     parser.add_argument('--s3_folder', type=str, default='your-s3-prefix/')
+    parser.add_argument('--upload_model', action='store_true')
+    parser.add_argument('--upload_bucket', type=str, default='your-bucket-name')
+    parser.add_argument('--upload_path', type=str, default='model/conformer.pt')
     args = parser.parse_args()
 
     main(args)
