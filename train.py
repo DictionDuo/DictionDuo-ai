@@ -1,5 +1,4 @@
 import os
-import argparse
 import torch
 import torch.nn as nn
 from datetime import datetime
@@ -9,6 +8,7 @@ from preprocessing.split_dataset import build_and_split
 from utils.phoneme_utils import phoneme2index
 from utils.seed import set_seed, get_data_loader
 from utils.logger import setup_logger
+from utils.config_loader import convert_config_to_namespace
 from tqdm import tqdm
 from difflib import SequenceMatcher
 import json
@@ -90,14 +90,15 @@ def evaluate(model, loader, phoneme2index, device, logger, stage="Validation"):
     logger.info(f"{stage} PER: {avg_per:.2%}")
     return avg_per
 
-def main(args):
+def main():
+    args = convert_config_to_namespace("train_config.json")
     set_seed(args.seed)
 
     logger = setup_logger(os.path.join(args.model_dir, 'train.log'))
     logger.info("===== Training Started =====")
     logger.info(f"Epochs: {args.epochs}, LR: {args.learning_rate}, Batch: {args.batch_size}, Seed: {args.seed}")
 
-    if args.download:
+    if getattr(args, "download", False):
         download_from_s3(args.bucket_name, args.s3_folder, args.train_data)
 
     wav_dir = os.path.join(args.train_data, 'wav')
@@ -144,19 +145,4 @@ def main(args):
     logger.info("===== Training + Evaluation Completed =====")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs', type=int, default=10)
-    parser.add_argument('--learning_rate', type=float, default=1e-4)
-    parser.add_argument('--batch_size', type=int, default=4)
-    parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--train_data', type=str, default=os.environ.get('SM_CHANNEL_TRAIN', '/opt/ml/input/data/train'))
-    parser.add_argument('--model_dir', type=str, default=os.environ.get('SM_MODEL_DIR', '/opt/ml/model'))
-    parser.add_argument('--download', action='store_true')
-    parser.add_argument('--bucket_name', type=str, default='your-bucket-name')
-    parser.add_argument('--s3_folder', type=str, default='your-s3-prefix/')
-    parser.add_argument('--upload_model', action='store_true')
-    parser.add_argument('--upload_bucket', type=str, default='your-bucket-name')
-    parser.add_argument('--upload_path', type=str, default='model/conformer.pt')
-    args = parser.parse_args()
-
-    main(args)
+    main()
