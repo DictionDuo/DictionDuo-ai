@@ -1,0 +1,7 @@
+torch>=1.4.0
+numpy
+tqdm
+boto3
+librosa
+scipy
+soundfile
