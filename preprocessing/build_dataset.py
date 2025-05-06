@@ -18,12 +18,23 @@ def build_metadata_list(wav_dir, json_dir):
 def get_max_lengths(metadata_list, phoneme2index):
     max_mel = 0
     max_label = 0
+
     for meta in metadata_list:
         mel = extract_features(meta["wav"])
         if mel is not None:
             max_mel = max(max_mel, mel.shape[0])
+
         with open(meta["json"], "r", encoding="utf-8") as f:
-            text = json.load(f)["transcription"]["AnswerLabelText"]
+            data = json.load(f)
+
+        if "transcription" in data and "AnswerLabelText" in data["transcription"]:
+            text = data["transcription"]["AnswerLabelText"]
+        elif "RecordingMetadata" in data and "prompt" in data["RecordingMetadata"]:
+            text = data["RecordingMetadata"]["prompt"]
+        else:
+            continue    
+
         label = Korean.text_to_phoneme_sequence(text, phoneme2index)
         max_label = max(max_label, len(label))
+        
     return max_mel, max_label
