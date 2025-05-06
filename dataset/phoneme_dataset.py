@@ -39,7 +39,14 @@ class PhonemeDataset(Dataset):
 
         with open(meta["json"], 'r', encoding='utf-8') as f:
             data = json.load(f)
-        text = data["transcription"]["AnswerLabelText"]
+
+        if "transcription" in data and "AnswerLabelText" in data["transcription"]:
+            text = data["transcription"]["AnswerLabelText"]
+        elif "RecordingMetadata" in data and "prompt" in data["RecordingMetadata"]:
+            text = data["RecordingMetadata"]["prompt"]
+        else:
+            raise KeyError("Expected transcription['AnswerLabelText'] or RecordingMetadata['prompt'] in JSON file")    
+
         labels = Korean.text_to_phoneme_sequence(text, self.phoneme2index)
         labels = self.pad_label(labels)
 
