@@ -7,7 +7,7 @@
     "model_dir": "/opt/ml/model",
     "download": true,
     "bucket_name": "dictionduo-bucket",
-    "s3_folder": "dataset/",
+    "s3_folder": "",
     "upload_model": true,
     "upload_bucket": "dictionduo-bucket",
     "upload_path": "model/"
