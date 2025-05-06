@@ -9,6 +9,6 @@
     "bucket_name": "dictionduo-bucket",
     "s3_folder": "",
     "upload_model": true,
-    "upload_bucket": "dictionduo-bucket",
+    "upload_bucket": "dd-conformer-bucket",
     "upload_path": "model/"
   }
