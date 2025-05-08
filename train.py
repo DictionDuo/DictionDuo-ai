@@ -120,7 +120,9 @@ def main():
     for epoch in range(args.epochs):
         logger.info(f"--- Epoch {epoch+1}/{args.epochs} ---")
         avg_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, logger)
-        avg_per = evaluate(model, val_loader, phoneme2index, device, logger, stage="Validation")
+
+        if (epoch + 1) % args.eval_interval == 0 or (epoch + 1) == args.epochs:
+            avg_per = evaluate(model, val_loader, phoneme2index, device, logger, stage="Validation")
 
     os.makedirs(args.model_dir, exist_ok=True)
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
