@@ -32,6 +32,8 @@ class PhonemeDataset(Dataset):
         meta = self.metadata_list[idx]
         features = extract_features(meta["wav"])
 
+        input_length = features.shape[0] if features is not None else 0
+
         if features is None:
             features = np.zeros((self.max_mel_length, 80), dtype=np.float32)
         else:
@@ -48,6 +50,12 @@ class PhonemeDataset(Dataset):
             raise KeyError("Expected transcription['AnswerLabelText'] or RecordingMetadata['prompt'] in JSON file")    
 
         labels = Korean.text_to_phoneme_sequence(text, self.phoneme2index)
+        label_length = len(labels)
         labels = self.pad_label(labels)
 
-        return torch.tensor(features), torch.tensor(labels)
+        return (
+            torch.tensor(features),
+            torch.tensor(labels),
+            torch.tensor(input_length, dtype=torch.long),
+            torch.tensor(label_length, dtype=torch.long)
+        )
