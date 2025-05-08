@@ -106,6 +106,12 @@ def main():
     test_loader = get_data_loader(test_dataset, batch_size=args.batch_size, shuffle=False, seed=args.seed)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    logger.info(f"CUDA available: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        logger.info(f"Using GPU device: {torch.cuda.get_device_name(0)}")
+    else:
+        logger.info("No GPU device available.")
+        
     model = Conformer(
         input_dim=80,
         num_classes=len(phoneme2index),
