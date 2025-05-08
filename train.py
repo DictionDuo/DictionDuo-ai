@@ -10,7 +10,7 @@ from utils.seed import set_seed, get_data_loader
 from utils.logger import setup_logger
 from utils.config_loader import convert_config_to_namespace
 from tqdm import tqdm
-from difflib import SequenceMatcher
+import Levenshtein
 import json
 import boto3
 
@@ -31,11 +31,10 @@ def upload_to_s3(file_path, bucket_name, upload_path):
     s3.upload_file(file_path, bucket_name, upload_path)
 
 def calculate_per(pred_seq, label_seq):
-    matcher = SequenceMatcher(None, pred_seq, label_seq)
-    matches = sum(triple.size for triple in matcher.get_matching_blocks())
-    total = len(label_seq)
-    errors = total - matches
-    return errors / total if total > 0 else 0
+    pred_str = ' '.join(pred_seq)
+    label_str = ' '.join(label_seq)
+    distance = Levenshtein.distance(pred_str, label_str)
+    return distance / max(len(label_seq), 1)
 
 def train_one_epoch(model, loader, criterion, optimizer, device, logger):
     model.train()
