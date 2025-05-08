@@ -45,7 +45,7 @@ def train_one_epoch(model, loader, criterion, optimizer, device, logger):
         input_lengths, label_lengths = input_lengths.to(device), label_lengths.to(device)
 
         outputs, output_lengths = model(features, input_lengths)
-        loss = criterion(outputs.transpose(0, 1), labels, output_lengths, label_lengths)
+        loss = criterion(outputs.transpose(0, 1).contiguous(), labels, output_lengths, label_lengths)
 
         optimizer.zero_grad()
         loss.backward()
