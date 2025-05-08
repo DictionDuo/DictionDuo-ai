@@ -57,11 +57,10 @@ def train_one_epoch(model, loader, criterion, optimizer, device, logger):
     logger.info(f"Train Loss: {avg_loss:.4f}")
     return avg_loss
 
-def evaluate(model, loader, phoneme2index, device, logger, stage="Validation"):
+def evaluate(model, loader, index2phoneme, device, logger, stage="Validation"):
     model.eval()
     total_per = 0.0
     total_samples = 0
-    index2phoneme = {v: k for k, v in phoneme2index.items()}
 
     with torch.no_grad():
         for features, labels, input_lengths, label_lengths in tqdm(loader, desc=f"Evaluating {stage}"):
@@ -117,12 +116,14 @@ def main():
     criterion = nn.CTCLoss(blank=0).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
 
+    index2phoneme = {v: k for k, v in phoneme2index.items()}
+
     for epoch in range(args.epochs):
         logger.info(f"--- Epoch {epoch+1}/{args.epochs} ---")
         avg_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, logger)
 
         if (epoch + 1) % args.eval_interval == 0 or (epoch + 1) == args.epochs:
-            avg_per = evaluate(model, val_loader, phoneme2index, device, logger, stage="Validation")
+            avg_per = evaluate(model, val_loader, index2phoneme, device, logger, stage="Validation")
 
     os.makedirs(args.model_dir, exist_ok=True)
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -136,7 +137,7 @@ def main():
         logger.info(f"Uploaded to s3://{args.upload_bucket}/{args.upload_path}")
 
     logger.info("===== Running Final Test Evaluation =====")
-    evaluate(model, test_loader, phoneme2index, device, logger, stage="Test")
+    evaluate(model, test_loader, index2phoneme, device, logger, stage="Test")
     logger.info("===== Training + Evaluation Completed =====")
 
 if __name__ == "__main__":
