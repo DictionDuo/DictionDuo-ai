@@ -79,8 +79,8 @@ def upload_to_s3(file_path, bucket, s3_path):
     print(f"[S3 Uploaded] {file_path} → s3://{bucket}/{s3_path}")
 
 def main():
-    wav_dir = "/home/ec2-user/data/wav"
-    json_dir = "/home/ec2-user/data/json"
+    wav_dir = "/home/ec2-user/data"
+    json_dir = "/home/ec2-user/data"
     output_dir = "./preprocessed"
     bucket_name = "dictionduo-bucket"
     s3_prefix = "preprocessed"
