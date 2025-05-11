@@ -1,5 +1,5 @@
-torch>=1.4.0
-torchaudio
+torch==1.13.1+cu117
+torchaudio==0.13.1+cu117
 numpy
 tqdm
 boto3
