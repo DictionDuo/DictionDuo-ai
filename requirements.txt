@@ -1,4 +1,5 @@
 torch>=1.4.0
+torchaudio
 numpy
 tqdm
 boto3
