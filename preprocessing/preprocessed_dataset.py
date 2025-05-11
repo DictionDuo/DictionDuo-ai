@@ -1,11 +1,20 @@
 import os, json, torch
 import numpy as np
+import torchaudio
 from tqdm import tqdm
 from preprocessing.feature_extraction import extract_features
 from preprocessing.build_dataset import build_metadata_list
 from preprocessing.split_dataset import split_metadata
 from utils.phoneme_utils import Korean, phoneme2index
 
+def is_valid_wav(wav_path):
+    try:
+        torchaudio.load(wav_path)
+        return True
+    except Exception as e:
+        print(f"[Invalid WAV] {wav_path} - {e}")
+        return False
+    
 def pad_mel(mel, max_len):
     if mel.shape[0] < max_len:
         pad_width = ((0, max_len - mel.shape[0]), (0, 0))
@@ -22,6 +31,9 @@ def get_max_lengths(metadata_list):
     max_label = 0
 
     for meta in tqdm(metadata_list, desc="Calculating max lengths"):
+        if not is_valid_wav(meta["wav"]):
+            continue
+
         mel = extract_features(meta["wav"])
         if mel is not None:
             max_mel = max(max_mel, mel.shape[0])
@@ -52,14 +64,19 @@ def process_split(split_list, split_name, out_dir, max_mel, max_label):
     os.makedirs(split_dir, exist_ok=True)
     for idx, meta in enumerate(tqdm(split_list, desc=f"Processing {split_name}")):
         try:
+            if not is_valid_wav(meta["wav"]):
+                continue    
+
             mel = extract_features(meta["wav"])
             if mel is None:
                 continue
+
             with open(meta["json"], encoding="utf-8") as f:
                 data = json.load(f)
             text = data.get("transcription", {}).get("AnswerLabelText") or data.get("RecordingMetadata", {}).get("prompt")
             if not text:
                 continue
+            
             label_seq = Korean.text_to_phoneme_sequence(text, phoneme2index)
             save_path = os.path.join(split_dir, f"{idx:05d}.pt")
             save_tensor(mel, label_seq, max_mel, max_label, save_path)
