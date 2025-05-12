@@ -62,24 +62,31 @@ def save_tensor(mel, label_seq, max_mel, max_label, save_path):
 def process_split(split_list, split_name, out_dir, max_mel, max_label):
     split_dir = os.path.join(out_dir, split_name)
     os.makedirs(split_dir, exist_ok=True)
+
     for idx, meta in enumerate(tqdm(split_list, desc=f"Processing {split_name}")):
         try:
+            # 손상된 WAV 파일 사전 필터링
             if not is_valid_wav(meta["wav"]):
+                print(f"[SKIP] Invalid WAV: {meta['wav']}")
                 continue    
 
             mel = extract_features(meta["wav"])
-            if mel is None:
+            # 추출 실패 또는 NaN/Inf 포함된 경우 필터링
+            if mel is None or not np.isfinite(mel).all():
+                print(f"[SKIP] Corrupted features: {meta['wav']}")
                 continue
 
             with open(meta["json"], encoding="utf-8") as f:
                 data = json.load(f)
+
             text = data.get("transcription", {}).get("AnswerLabelText") or data.get("RecordingMetadata", {}).get("prompt")
             if not text:
                 continue
-            
+
             label_seq = Korean.text_to_phoneme_sequence(text, phoneme2index)
             save_path = os.path.join(split_dir, f"{idx:05d}.pt")
             save_tensor(mel, label_seq, max_mel, max_label, save_path)
+            
         except Exception as e:
             print(f"[Error] {meta['wav']} - {e}")
 
