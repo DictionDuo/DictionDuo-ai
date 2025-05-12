@@ -50,8 +50,17 @@ def get_max_lengths(metadata_list):
     return max_mel, max_label
 
 def save_tensor(mel, label_seq, max_mel, max_label, save_path):
+    if mel is None or not np.isfinite(mel).all():
+        print(f"[SKIP] Invalid mel before saving: {save_path}")
+        return
+    
+    if not label_seq or not all(isinstance(x, int) for x in label_seq):
+        print(f"[SKIP] Invalid label before saving: {save_path}")
+        return
+    
     mel_padded = pad_mel(mel, max_mel)
     label_padded = pad_label(label_seq, max_label)
+    
     torch.save({
         "mel": torch.tensor(mel_padded, dtype=torch.float32),
         "label": torch.tensor(label_padded, dtype=torch.long),
@@ -86,7 +95,7 @@ def process_split(split_list, split_name, out_dir, max_mel, max_label):
             label_seq = Korean.text_to_phoneme_sequence(text, phoneme2index)
             save_path = os.path.join(split_dir, f"{idx:05d}.pt")
             save_tensor(mel, label_seq, max_mel, max_label, save_path)
-            
+
         except Exception as e:
             print(f"[Error] {meta['wav']} - {e}")
 
