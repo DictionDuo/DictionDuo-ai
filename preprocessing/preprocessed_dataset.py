@@ -1,5 +1,5 @@
 import os, json, torch
-import numpy as np
+import torch.nn.functional as F
 import torchaudio
 from tqdm import tqdm
 from preprocessing.feature_extraction import extract_features
@@ -15,16 +15,14 @@ def is_valid_wav(wav_path):
         print(f"[Invalid WAV] {wav_path} - {e}")
         return False
     
-def pad_mel(mel, max_len):
-    if mel.shape[0] < max_len:
-        pad_width = ((0, max_len - mel.shape[0]), (0, 0))
-        return np.pad(mel, pad_width)
-    return mel[:max_len]
+def pad_mel(mel_tensor: torch.Tensor, max_len: int) -> torch.Tensor:
+    T, D = mel_tensor.shape
+    if T < max_len:
+        mel_tensor = F.pad(mel_tensor, (0, 0, 0, max_len - T))  # (left, right, top, bottom)
+    return mel_tensor[:max_len, :]
 
-def pad_label(label, max_len):
-    if len(label) < max_len:
-        return label + [0] * (max_len - len(label))
-    return label[:max_len]
+def pad_label(label: list, max_len: int) -> list:
+    return label + [0] * (max_len - len(label)) if len(label) < max_len else label[:max_len]
 
 def get_max_lengths(metadata_list):
     max_mel = 0
@@ -49,24 +47,28 @@ def get_max_lengths(metadata_list):
 
     return max_mel, max_label
 
-def save_tensor(mel, label_seq, max_mel, max_label, save_path):
-    if mel is None or not np.isfinite(mel).all():
-        print(f"[SKIP] Invalid mel before saving: {save_path}")
+def save_tensor(mel_tensor, label_seq, max_mel, max_label, save_path):
+    if mel_tensor is None or not torch.isfinite(mel_tensor).all():
+        print(f"[SKIP] Invalid mel: {save_path}")
         return
     
     if not label_seq or not all(isinstance(x, int) for x in label_seq):
-        print(f"[SKIP] Invalid label before saving: {save_path}")
+        print(f"[SKIP] Invalid label: {save_path}")
         return
     
-    mel_padded = pad_mel(mel, max_mel)
-    label_padded = pad_label(label_seq, max_label)
-    
-    torch.save({
-        "mel": torch.tensor(mel_padded, dtype=torch.float32),
-        "label": torch.tensor(label_padded, dtype=torch.long),
-        "input_length": mel.shape[0],
-        "label_length": len(label_seq),
-    }, save_path)
+    try:
+        mel_padded = pad_mel(mel_tensor, max_mel)
+        label_padded = pad_label(label_seq, max_label)
+        
+        torch.save({
+            "mel": mel_padded,
+            "label": torch.tensor(label_padded, dtype=torch.long),
+            "input_length": mel_tensor.shape[0],
+            "label_length": len(label_seq),
+        }, save_path)
+
+    except Exception as e:
+        print(f"[torch.save ERROR] {save_path} - {e}")
 
 def process_split(split_list, split_name, out_dir, max_mel, max_label):
     split_dir = os.path.join(out_dir, split_name)
@@ -81,7 +83,7 @@ def process_split(split_list, split_name, out_dir, max_mel, max_label):
 
             mel = extract_features(meta["wav"])
             # 추출 실패 또는 NaN/Inf 포함된 경우 필터링
-            if mel is None or not np.isfinite(mel).all():
+            if mel is None or not torch.isfinite(mel).all():
                 print(f"[SKIP] Corrupted features: {meta['wav']}")
                 continue
 
@@ -102,7 +104,7 @@ def process_split(split_list, split_name, out_dir, max_mel, max_label):
 def main():
     wav_dir = "/home/ec2-user/data"
     json_dir = "/home/ec2-user/data"
-    output_dir = "./preprocessed"
+    output_dir = "/home/ec2-user/preprocessed"
     os.makedirs(output_dir, exist_ok=True)
 
     metadata_list = build_metadata_list(wav_dir, json_dir)
