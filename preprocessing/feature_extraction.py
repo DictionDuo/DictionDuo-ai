@@ -1,29 +1,35 @@
-import numpy as np
-import librosa
+import torch
+import torchaudio
 
-def extract_features(wav_path: str, sr: int = 16000, n_mels: int = 80) -> np.ndarray:
-    """
-    Extract Mel-spectrogram from a WAV file.
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    Args:
-        wav_path (str): path to the WAV file.
-        sr (int): sampling rate.
-        n_mels (int): number of Mel filterbanks.
+mel_transform = torchaudio.transforms.MelSpectrogram(
+    sample_rate=16000,
+    n_fft=400,
+    hop_length=160,
+    n_mels=80
+).to(device)
 
-    Returns:
-        np.ndarray: Transposed mel-spectrogram with shape (T, n_mels)
-    """
+db_transform = torchaudio.transforms.AmplitudeToDB(top_db=80).to(device)
+
+def extract_features(wav_path: str) -> torch.Tensor:
     try:
-        y, _ = librosa.load(wav_path, sr=sr)
-        mel = librosa.feature.melspectrogram(y=y, sr=sr, n_fft=400, hop_length=160, n_mels=n_mels)
-        mel_db = librosa.power_to_db(mel, ref=np.max).T
+        waveform, sr = torchaudio.load(wav_path)  # waveform: [1, T]
+        if sr != 16000:
+            resample = torchaudio.transforms.Resample(orig_freq=sr, new_freq=16000)
+            waveform = resample(waveform)
         
-        if not np.isfinite(mel_db).all():
-            print(f"[extract_features] Skipped due to non-finite values: {wav_path}")
-            return None
+        waveform = waveform.to(device)
+        mel = mel_transform(waveform)         # [1, 80, T]
+        mel_db = db_transform(mel)            # [1, 80, T]
+        mel_db = mel_db.squeeze(0).transpose(0, 1).cpu()  # [T, 80]
 
-        return mel_db.astype(np.float32)
+        if not torch.isfinite(mel_db).all():
+            print(f"[extract_features] Skipped non-finite values: {wav_path}")
+            return None
+        
+        return mel_db
 
     except Exception as e:
-        print(f"[Error] Failed to extract features from {wav_path}: {e}")
+        print(f"[extract_features ERROR] {wav_path} - {e}")
         return None
