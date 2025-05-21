@@ -1,11 +1,14 @@
-import os, json, torch
-import torch.nn.functional as F
+import os
+import json
+import torch
+import random
 import torchaudio
 from tqdm import tqdm
 from preprocessing.feature_extraction import extract_features
 from preprocessing.build_dataset import build_metadata_list
 from preprocessing.split_dataset import split_metadata
 from utils.phoneme_utils import Korean, phoneme2index
+from utils.seed import set_seed
 
 def is_valid_wav(wav_path):
     try:
@@ -14,67 +17,14 @@ def is_valid_wav(wav_path):
     except Exception as e:
         print(f"[Invalid WAV] {wav_path} - {e}")
         return False
-    
-def pad_mel(mel_tensor: torch.Tensor, max_len: int) -> torch.Tensor:
-    T, D = mel_tensor.shape
-    if T < max_len:
-        mel_tensor = F.pad(mel_tensor, (0, 0, 0, max_len - T))  # (left, right, top, bottom)
-    return mel_tensor[:max_len, :]
 
-def pad_label(label: list, max_len: int) -> list:
-    return label + [0] * (max_len - len(label)) if len(label) < max_len else label[:max_len]
+def process_split(split_list, split_name, out_dir):
+    all_mels = []
+    all_labels = []
+    input_lengths = []
+    label_lengths = []
 
-def get_max_lengths(metadata_list):
-    max_mel = 0
-    max_label = 0
-
-    for meta in tqdm(metadata_list, desc="Calculating max lengths"):
-        if not is_valid_wav(meta["wav"]):
-            continue
-
-        mel = extract_features(meta["wav"])
-        if mel is not None:
-            max_mel = max(max_mel, mel.shape[0])
-
-        with open(meta["json"], encoding="utf-8") as f:
-            data = json.load(f)
-
-        text = data.get("transcription", {}).get("AnswerLabelText") or data.get("RecordingMetadata", {}).get("prompt")
-
-        if text:
-            label_seq = Korean.text_to_phoneme_sequence(text, phoneme2index)
-            max_label = max(max_label, len(label_seq))
-
-    return max_mel, max_label
-
-def save_tensor(mel_tensor, label_seq, max_mel, max_label, save_path):
-    if mel_tensor is None or not torch.isfinite(mel_tensor).all():
-        print(f"[SKIP] Invalid mel: {save_path}")
-        return
-    
-    if not label_seq or not all(isinstance(x, int) for x in label_seq):
-        print(f"[SKIP] Invalid label: {save_path}")
-        return
-    
-    try:
-        mel_padded = pad_mel(mel_tensor, max_mel)
-        label_padded = pad_label(label_seq, max_label)
-        
-        torch.save({
-            "mel": mel_padded,
-            "label": torch.tensor(label_padded, dtype=torch.long),
-            "input_length": mel_tensor.shape[0],
-            "label_length": len(label_seq),
-        }, save_path)
-
-    except Exception as e:
-        print(f"[torch.save ERROR] {save_path} - {e}")
-
-def process_split(split_list, split_name, out_dir, max_mel, max_label):
-    split_dir = os.path.join(out_dir, split_name)
-    os.makedirs(split_dir, exist_ok=True)
-
-    for idx, meta in enumerate(tqdm(split_list, desc=f"Processing {split_name}")):
+    for meta in tqdm(split_list, desc=f"Processing {split_name}"):
         try:
             # 손상된 WAV 파일 사전 필터링
             if not is_valid_wav(meta["wav"]):
@@ -95,11 +45,26 @@ def process_split(split_list, split_name, out_dir, max_mel, max_label):
                 continue
 
             label_seq = Korean.text_to_phoneme_sequence(text, phoneme2index)
-            save_path = os.path.join(split_dir, f"{idx:05d}.pt")
-            save_tensor(mel, label_seq, max_mel, max_label, save_path)
+            if not label_seq or not all(isinstance(x, int) for x in label_seq):
+                continue
+
+            all_mels.append(mel.cpu())
+            all_labels.append(label_seq)
+            input_lengths.append(mel.shape[0])
+            label_lengths.append(len(label_seq))
 
         except Exception as e:
             print(f"[Error] {meta['wav']} - {e}")
+            continue
+
+    save_path = os.path.join(out_dir, f"{split_name}_dataset.pt")
+    torch.save({
+        "mels": all_mels,
+        "labels": all_labels,
+        "input_lengths": input_lengths,
+        "label_lengths": label_lengths,
+    }, save_path)
+    print(f"[Saved] {split_name} → {save_path} ({len(all_mels)} samples)")
 
 def main():
     wav_dir = "/home/ec2-user/data"
@@ -107,15 +72,15 @@ def main():
     output_dir = "/home/ec2-user/preprocessed"
     os.makedirs(output_dir, exist_ok=True)
 
+    set_seed(42)
     metadata_list = build_metadata_list(wav_dir, json_dir)
+    random.shuffle(metadata_list)
+    
     train_list, val_list, test_list = split_metadata(metadata_list)
 
-    max_mel, max_label = get_max_lengths(metadata_list)
-    print(f"[max_mel={max_mel}], [max_label={max_label}]")
-
-    process_split(train_list, "train", output_dir, max_mel, max_label)
-    process_split(val_list, "val", output_dir, max_mel, max_label)
-    process_split(test_list, "test", output_dir, max_mel, max_label)
+    process_split(train_list, "train", output_dir)
+    process_split(val_list, "val", output_dir)
+    process_split(test_list, "test", output_dir)
 
 if __name__ == "__main__":
     main()
