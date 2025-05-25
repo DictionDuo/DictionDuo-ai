@@ -3,8 +3,7 @@ import torch
 import torch.nn as nn
 from datetime import datetime
 from conformer.model import Conformer
-from dataset.phoneme_dataset import PhonemeDataset
-from preprocessing.split_dataset import build_and_split
+from dataset.phoneme_tensor_dataset import PhonemeTensorDataset
 from utils.phoneme_utils import phoneme2index
 from utils.seed import set_seed, get_data_loader
 from utils.logger import setup_logger
@@ -14,17 +13,10 @@ import Levenshtein
 import json
 import boto3
 
-def download_from_s3(bucket_name, s3_folder, local_dir):
+def download_from_s3(bucket_name, s3_key, local_path):
     s3 = boto3.client('s3')
-    paginator = s3.get_paginator('list_objects_v2')
-    for result in paginator.paginate(Bucket=bucket_name, Prefix=s3_folder):
-        for content in result.get('Contents', []):
-            key = content['Key']
-            if key.endswith('/'):
-                continue
-            local_file_path = os.path.join(local_dir, os.path.relpath(key, s3_folder))
-            os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
-            s3.download_file(bucket_name, key, local_file_path)
+    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+    s3.download_file(bucket_name, s3_key, local_path)
 
 def upload_to_s3(file_path, bucket_name, upload_path):
     s3 = boto3.client('s3')
@@ -91,15 +83,13 @@ def main():
     logger.info(f"Epochs: {args.epochs}, LR: {args.learning_rate}, Batch: {args.batch_size}, Seed: {args.seed}")
 
     if getattr(args, "download", False):
-        download_from_s3(args.bucket_name, args.s3_folder, args.train_data)
+        download_from_s3(args.bucket_name, "preprocessed/train_dataset.pt", "preprocessed/train_dataset.pt")
+        download_from_s3(args.bucket_name, "preprocessed/val_dataset.pt", "preprocessed/val_dataset.pt")
+        download_from_s3(args.bucket_name, "preprocessed/test_dataset.pt", "preprocessed/test_dataset.pt")
 
-    wav_dir = os.path.join(args.train_data, 'wav')
-    json_dir = os.path.join(args.train_data, 'json')
-    train_list, val_list, test_list = build_and_split(wav_dir, json_dir)
-
-    train_dataset = PhonemeDataset(train_list, phoneme2index)
-    val_dataset = PhonemeDataset(val_list, phoneme2index)
-    test_dataset = PhonemeDataset(test_list, phoneme2index)
+    train_dataset = PhonemeTensorDataset(torch.load("preprocessed/train_dataset.pt"))
+    val_dataset = PhonemeTensorDataset(torch.load("preprocessed/val_dataset.pt"))
+    test_dataset = PhonemeTensorDataset(torch.load("preprocessed/test_dataset.pt"))
 
     train_loader = get_data_loader(train_dataset, batch_size=args.batch_size, shuffle=True, seed=args.seed)
     val_loader = get_data_loader(val_dataset, batch_size=args.batch_size, shuffle=False, seed=args.seed)
