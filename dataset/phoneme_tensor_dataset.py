@@ -13,8 +13,8 @@ class PhonemeTensorDataset(Dataset):
 
     def __getitem__(self, idx):
         return (
-            torch.tensor(self.mels[idx], dtype=torch.float32),
-            torch.tensor(self.labels[idx], dtype=torch.long),
+            self.mels[idx],
+            self.labels[idx],
             torch.tensor(self.input_lengths[idx], dtype=torch.long),
             torch.tensor(self.label_lengths[idx], dtype=torch.long),
         )
