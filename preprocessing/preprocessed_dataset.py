@@ -4,6 +4,7 @@ import torch
 import random
 import torchaudio
 from tqdm import tqdm
+from torch.nn.utils.rnn import pad_sequence
 from preprocessing.feature_extraction import extract_features
 from preprocessing.build_dataset import build_metadata_list
 from preprocessing.split_dataset import split_metadata
@@ -54,7 +55,7 @@ def process_split(split_list, split_name, out_dir):
                 continue
 
             all_mels.append(mel.cpu())
-            all_labels.append(label_seq)
+            all_labels.append(torch.tensor(label_seq, dtype=torch.long))
             input_lengths.append(mel.shape[0])
             label_lengths.append(len(label_seq))
 
@@ -63,10 +64,13 @@ def process_split(split_list, split_name, out_dir):
             skipped_meta.append(meta)
             continue
 
+    mels_padded = pad_sequence(all_mels, batch_first=True)  # Tensor (N, T_max, D)
+    labels_padded = pad_sequence(all_labels, batch_first=True)  # Tensor (N, L_max)
+
     save_path = os.path.join(out_dir, f"{split_name}_dataset.pt")
     torch.save({
-        "mels": all_mels,
-        "labels": all_labels,
+        "mels": mels_padded,
+        "labels": labels_padded,
         "input_lengths": input_lengths,
         "label_lengths": label_lengths,
     }, save_path)
