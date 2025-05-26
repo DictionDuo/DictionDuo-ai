@@ -2,6 +2,7 @@ import os
 import torch
 import torch.nn as nn
 from datetime import datetime
+from torch.utils.data import ConcatDataset
 from conformer.model import Conformer
 from dataset.phoneme_tensor_dataset import PhonemeTensorDataset
 from utils.phoneme_utils import phoneme2index
@@ -74,6 +75,15 @@ def evaluate(model, loader, index2phoneme, device, logger, stage="Validation"):
     logger.info(f"{stage} PER: {avg_per:.2%}")
     return avg_per
 
+def load_chunked_dataset(prefix):
+    dataset_list = []
+    for file_name in sorted(os.listdir("preprocessed")):
+        if file_name.startswith(prefix) and file_name.endswith(".pt"):
+            data = torch.load(os.path.join("preprocessed", file_name))
+            dataset = PhonemeTensorDataset(data)
+            dataset_list.append(dataset)
+    return ConcatDataset(dataset_list)
+
 def main():
     args = convert_config_to_namespace("train_config.json")
     set_seed(args.seed)
@@ -82,14 +92,9 @@ def main():
     logger.info("===== Training Started =====")
     logger.info(f"Epochs: {args.epochs}, LR: {args.learning_rate}, Batch: {args.batch_size}, Seed: {args.seed}")
 
-    if getattr(args, "download", False):
-        download_from_s3(args.bucket_name, "preprocessed/train_dataset.pt", "preprocessed/train_dataset.pt")
-        download_from_s3(args.bucket_name, "preprocessed/val_dataset.pt", "preprocessed/val_dataset.pt")
-        download_from_s3(args.bucket_name, "preprocessed/test_dataset.pt", "preprocessed/test_dataset.pt")
-
-    train_dataset = PhonemeTensorDataset(torch.load("preprocessed/train_dataset.pt"))
-    val_dataset = PhonemeTensorDataset(torch.load("preprocessed/val_dataset.pt"))
-    test_dataset = PhonemeTensorDataset(torch.load("preprocessed/test_dataset.pt"))
+    train_dataset = load_chunked_dataset("train_")
+    val_dataset = load_chunked_dataset("val_")
+    test_dataset = load_chunked_dataset("test_")
 
     train_loader = get_data_loader(train_dataset, batch_size=args.batch_size, shuffle=True, seed=args.seed)
     val_loader = get_data_loader(val_dataset, batch_size=args.batch_size, shuffle=False, seed=args.seed)
