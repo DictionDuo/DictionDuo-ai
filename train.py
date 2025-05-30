@@ -2,7 +2,6 @@ import os
 import torch
 import torch.nn as nn
 from datetime import datetime
-from torch.utils.data import ConcatDataset
 from conformer.model import Conformer
 from dataset.phoneme_tensor_dataset import PhonemeTensorDataset
 from utils.phoneme_utils import phoneme2index
@@ -75,14 +74,9 @@ def evaluate(model, loader, index2phoneme, device, logger, stage="Validation"):
     logger.info(f"{stage} PER: {avg_per:.2%}")
     return avg_per
 
-def load_chunked_dataset(prefix):
-    dataset_list = []
-    for file_name in sorted(os.listdir("preprocessed")):
-        if file_name.startswith(prefix) and file_name.endswith(".pt"):
-            data = torch.load(os.path.join("preprocessed", file_name))
-            dataset = PhonemeTensorDataset(data)
-            dataset_list.append(dataset)
-    return ConcatDataset(dataset_list)
+def load_dataset(file_name):
+    data = torch.load(os.path.join("preprocessed", file_name))
+    return PhonemeTensorDataset(data)
 
 def main():
     args = convert_config_to_namespace("train_config.json")
@@ -92,9 +86,9 @@ def main():
     logger.info("===== Training Started =====")
     logger.info(f"Epochs: {args.epochs}, LR: {args.learning_rate}, Batch: {args.batch_size}, Seed: {args.seed}")
 
-    train_dataset = load_chunked_dataset("train_")
-    val_dataset = load_chunked_dataset("val_")
-    test_dataset = load_chunked_dataset("test_")
+    train_dataset = load_dataset("train_dataset.pt")
+    val_dataset = load_dataset("val_dataset.pt")
+    test_dataset = load_dataset("test_dataset.pt")
 
     train_loader = get_data_loader(train_dataset, batch_size=args.batch_size, shuffle=True, seed=args.seed)
     val_loader = get_data_loader(val_dataset, batch_size=args.batch_size, shuffle=False, seed=args.seed)
