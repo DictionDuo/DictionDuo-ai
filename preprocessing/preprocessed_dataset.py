@@ -19,19 +19,14 @@ def is_valid_wav(wav_path):
         print(f"[Invalid WAV] {wav_path} - {e}")
         return False
 
-def process_split(split_list, split_name, out_dir, chunk_size=500):
+def process_split(split_list, split_name, out_dir):
     skipped_meta = []
-    total_saved = 0
-
-    for chunk_idx in range(0, len(split_list), chunk_size):
-        chunk = split_list[chunk_idx:chunk_idx + chunk_size]
-
     all_mels = []
     all_labels = []
     input_lengths = []
     label_lengths = []
 
-    for meta in tqdm(split_list, desc=f"Processing {split_name}_chunk{chunk_idx//chunk_size}"):
+    for meta in tqdm(split_list, desc=f"Processing {split_name}"):
         try:
             # 손상된 WAV 파일 사전 필터링
             if not is_valid_wav(meta["wav"]):
@@ -67,24 +62,21 @@ def process_split(split_list, split_name, out_dir, chunk_size=500):
         except Exception as e:
             print(f"[Error] {meta['wav']} - {e}")
             skipped_meta.append(meta)
-            continue
 
     if all_mels:
         mels_padded = pad_sequence(all_mels, batch_first=True)
         labels_padded = pad_sequence(all_labels, batch_first=True)
 
-        chunk_save_path = os.path.join(out_dir, f"{split_name}_{chunk_idx//chunk_size}.pt")
+        save_path = os.path.join(out_dir, f"{split_name}_dataset.pt")
 
         torch.save({
             "mels": mels_padded,
             "labels": labels_padded,
             "input_lengths": input_lengths,
             "label_lengths": label_lengths,
-        }, chunk_save_path)
+        }, save_path)
         total_saved += len(all_mels)
-        print(f"[Saved] chunk {chunk_idx//chunk_size} → {chunk_save_path} ({len(all_mels)} samples)")
-
-    print(f"[Total Saved] {split_name} → {total_saved} samples in {out_dir}")
+        print(f"[Saved] {save_path} ({len(all_mels)} samples)")
     
     if skipped_meta:
         skipped_path = os.path.join(out_dir, f"{split_name}_skipped.json")
