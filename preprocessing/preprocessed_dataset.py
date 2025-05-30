@@ -75,7 +75,6 @@ def process_split(split_list, split_name, out_dir):
             "input_lengths": input_lengths,
             "label_lengths": label_lengths,
         }, save_path)
-        total_saved += len(all_mels)
         print(f"[Saved] {save_path} ({len(all_mels)} samples)")
     
     if skipped_meta:
