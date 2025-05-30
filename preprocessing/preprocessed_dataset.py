@@ -93,9 +93,9 @@ def process_split(split_list, split_name, out_dir, chunk_size=500):
         print(f"[Saved] {split_name}_skipped.json → {len(skipped_meta)} skipped samples")
 
 def main():
-    wav_dir = "/home/ec2-user/data"
-    json_dir = "/home/ec2-user/data"
-    output_dir = "/home/ec2-user/preprocessed"
+    wav_dir = "/home/ubuntu/data"
+    json_dir = "/home/ubuntu/data"
+    output_dir = "/home/ubuntu/preprocessed"
     os.makedirs(output_dir, exist_ok=True)
 
     set_seed(42)
