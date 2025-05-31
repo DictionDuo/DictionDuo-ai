@@ -74,9 +74,13 @@ def evaluate(model, loader, index2phoneme, device, logger, stage="Validation"):
     logger.info(f"{stage} PER: {avg_per:.2%}")
     return avg_per
 
-def load_dataset(file_name):
-    data = torch.load(os.path.join("preprocessed", file_name))
-    return PhonemeTensorDataset(data)
+def load_dataset_from_s3(s3_path):
+    bucket = s3_path.split('/')[2]
+    key = '/'.join(s3_path.split('/')[3:])
+    filename = os.path.basename(key)
+    local_path = os.path.join("preprocessed", filename)
+    download_from_s3(bucket, key, local_path)
+    return torch.load(local_path)
 
 def main():
     args = convert_config_to_namespace("train_config.json")
@@ -86,9 +90,14 @@ def main():
     logger.info("===== Training Started =====")
     logger.info(f"Epochs: {args.epochs}, LR: {args.learning_rate}, Batch: {args.batch_size}, Seed: {args.seed}")
 
-    train_dataset = load_dataset("train_dataset.pt")
-    val_dataset = load_dataset("val_dataset.pt")
-    test_dataset = load_dataset("test_dataset.pt")
+    os.makedirs("preprocessed", exist_ok=True)
+    train_data = load_dataset_from_s3(args.train_dataset_path)
+    val_data = load_dataset_from_s3(args.val_dataset_path)
+    test_data = load_dataset_from_s3(args.test_dataset_path)
+
+    train_dataset = PhonemeTensorDataset(train_data)
+    val_dataset = PhonemeTensorDataset(val_data)
+    test_dataset = PhonemeTensorDataset(test_data)
 
     train_loader = get_data_loader(train_dataset, batch_size=args.batch_size, shuffle=True, seed=args.seed)
     val_loader = get_data_loader(val_dataset, batch_size=args.batch_size, shuffle=False, seed=args.seed)
