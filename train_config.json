@@ -9,5 +9,8 @@
     "upload_model": true,
     "upload_bucket": "dd-conformer-bucket",
     "upload_path": "model/",
-    "eval_interval": 5
+    "eval_interval": 5,
+    "train_dataset_path": "s3://dictionduo-bucket/preprocessed/train_dataset.pt",
+    "val_dataset_path": "s3://dictionduo-bucket/preprocessed/val_dataset.pt",
+    "test_dataset_path": "s3://dictionduo-bucket/preprocessed/test_dataset.pt"
   }
