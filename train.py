@@ -118,7 +118,7 @@ def main():
     model = Conformer(
         input_dim=80,
         num_classes=len(phoneme2index),
-        encoder_dim=256,
+        encoder_dim=128,
         num_encoder_layers=4,
     ).to(device)
 
