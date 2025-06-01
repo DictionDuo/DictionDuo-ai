@@ -119,7 +119,7 @@ def main():
         input_dim=80,
         num_classes=len(phoneme2index),
         encoder_dim=128,
-        num_encoder_layers=4,
+        num_encoder_layers=2,
     ).to(device)
 
     criterion = nn.CTCLoss(blank=0).to(device)
