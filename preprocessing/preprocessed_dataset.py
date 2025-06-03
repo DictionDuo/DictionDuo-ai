@@ -14,7 +14,7 @@ from utils.seed import set_seed
 MAX_INPUT_LENGTH = 800  # 고정 mel 길이 (frame 단위)
 HOP_LENGTH = 160
 SAMPLING_RATE = 16000
-FRAME_TO_SEC = lambda frame: frame * HOP_LENGTH / SAMPLING_RATE
+SEC_TO_FRAME = lambda sec: int(sec * SAMPLING_RATE / HOP_LENGTH)
 
 def is_valid_wav(wav_path):
     try:
@@ -27,10 +27,9 @@ def is_valid_wav(wav_path):
 def process_split(split_list, split_name, out_dir):
     skipped_meta = []
     all_mels = []
-    all_phonemes = []
-    all_errors = []
+    all_phoneme_frames = []
+    all_error_frames = []
     input_lengths = []
-    label_lengths = []
 
     error_map_path = os.path.join(os.path.dirname(__file__), "../utils/error_class_map.json")
     with open(error_map_path, encoding="utf-8") as f:
@@ -51,8 +50,11 @@ def process_split(split_list, split_name, out_dir):
                 skipped_meta.append(meta)
                 continue
 
+            original_length = min(mel.shape[0], MAX_INPUT_LENGTH)
             mel = mel[:MAX_INPUT_LENGTH, :]
-            mel_end_sec = FRAME_TO_SEC(mel.shape[0])
+            if mel.shape[0] < MAX_INPUT_LENGTH:
+                pad_len = MAX_INPUT_LENGTH - mel.shape[0]
+                mel = torch.nn.functional.pad(mel, (0, 0, 0, pad_len))  # pad time dimension
 
             with open(meta["json"], encoding="utf-8") as f:
                 data = json.load(f)
@@ -60,38 +62,27 @@ def process_split(split_list, split_name, out_dir):
             phones = data["RecordingMetadata"]["phonemic"]["phones"]
             errors = data["RecordingMetadata"]["phonemic"].get("error_tags", [])
 
-            phoneme_seq = []
-            error_seq = []
+            phoneme_frames = torch.zeros(MAX_INPUT_LENGTH, dtype=torch.long)
+            error_frames = torch.zeros(MAX_INPUT_LENGTH, dtype=torch.long)
 
             for p in phones:
-                if p["start"] >= mel_end_sec:
-                    break
-
+                start_f = max(0, SEC_TO_FRAME(p["start"]))
+                end_f = min(MAX_INPUT_LENGTH, SEC_TO_FRAME(p["end"]))
                 phoneme = p["phone"]
-                phoneme_idx = phoneme2index.get(phoneme)
-                if phoneme_idx is None:
-                    continue
-                phoneme_seq.append(phoneme_idx)
+                idx = phoneme2index.get(phoneme, 0)
+                phoneme_frames[start_f:end_f] = idx
 
-                matched_tag = None
-                for e in errors:
-                    if e["start"] <= p["start"] < e["end"]:
-                        matched_tag = e["error_tag"]
-                        break
-
-                error_class = error_class_map.get(matched_tag, 0)
-                error_seq.append(error_class)
-
-            # CTC 조건 확인
-            if not phoneme_seq or len(phoneme_seq) >= (mel.shape[0] // 2):
-                skipped_meta.append(meta)
-                continue
+            for e in errors:
+                start_f = max(0, SEC_TO_FRAME(e["start"]))
+                end_f = min(MAX_INPUT_LENGTH, SEC_TO_FRAME(e["end"]))
+                tag = e.get("error_tag")
+                err_idx = error_class_map.get(tag, 0)
+                error_frames[start_f:end_f] = err_idx
 
             all_mels.append(mel.cpu())
-            all_phonemes.append(torch.tensor(phoneme_seq, dtype=torch.long))
-            all_errors.append(torch.tensor(error_seq, dtype=torch.long))
-            input_lengths.append(mel.shape[0])
-            label_lengths.append(len(phoneme_seq))
+            all_phoneme_frames.append(phoneme_frames)
+            all_error_frames.append(error_frames)
+            input_lengths.append(original_length)
 
         except Exception as e:
             print(f"[Error] {meta['wav']} - {e}")
@@ -99,8 +90,8 @@ def process_split(split_list, split_name, out_dir):
 
     if all_mels:
         mels_padded = pad_sequence(all_mels, batch_first=True)
-        phonemes_padded = pad_sequence(all_phonemes, batch_first=True)
-        errors_padded = pad_sequence(all_errors, batch_first=True)
+        phonemes_padded = pad_sequence(all_phoneme_frames, batch_first=True)
+        errors_padded = pad_sequence(all_error_frames, batch_first=True)
 
         save_path = os.path.join(out_dir, f"{split_name}_dataset.pt")
 
@@ -108,8 +99,7 @@ def process_split(split_list, split_name, out_dir):
             "mels": mels_padded,
             "phonemes": phonemes_padded,
             "errors": errors_padded,
-            "input_lengths": input_lengths,
-            "label_lengths": label_lengths,
+            "input_lengths": input_lengths
         }, save_path)
         print(f"[Saved] {save_path} ({len(all_mels)} samples)")
     
