@@ -32,7 +32,8 @@ def process_split(split_list, split_name, out_dir):
     input_lengths = []
     label_lengths = []
 
-    with open("error_class_map.json", encoding="utf-8") as f:
+    error_map_path = os.path.join(os.path.dirname(__file__), "../utils/error_class_map.json")
+    with open(error_map_path, encoding="utf-8") as f:
         error_class_map = json.load(f)
 
     for meta in tqdm(split_list, desc=f"Processing {split_name}"):
