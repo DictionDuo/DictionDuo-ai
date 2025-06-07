@@ -37,7 +37,7 @@ def train_one_epoch(model, loader, criterion, optimizer, device, logger):
     model.train()
     total_loss = 0.0
 
-    for features, labels, input_lengths, label_lengths in tqdm(loader, desc="Training"):
+    for features, labels, errors, input_lengths, label_lengths in tqdm(loader, desc="Training"):
         features, labels = features.to(device), labels.to(device)
         input_lengths, label_lengths = input_lengths.to(device), label_lengths.to(device)
 
@@ -60,7 +60,7 @@ def evaluate(model, loader, index2phoneme, device, logger, stage="Validation"):
     total_samples = 0
 
     with torch.no_grad():
-        for features, labels, input_lengths, label_lengths in tqdm(loader, desc=f"Evaluating {stage}"):
+        for features, labels, errors, input_lengths, label_lengths in tqdm(loader, desc=f"Evaluating {stage}"):
             features, labels = features.to(device), labels.to(device)
             input_lengths, label_lengths = input_lengths.to(device), label_lengths.to(device)
 
