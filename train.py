@@ -1,16 +1,11 @@
 import os
-os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-
 import torch
-torch.use_deterministic_algorithms(True, warn_only=True)
-
 import torch.nn as nn
 from datetime import datetime
+from torch.utils.data import DataLoader
 from conformer.model import Conformer
 from dataset.phoneme_tensor_dataset import PhonemeTensorDataset
 from utils.phoneme_utils import phoneme2index
-from utils.seed import set_seed, get_data_loader
 from utils.logger import setup_logger
 from utils.config_loader import convert_config_to_namespace
 from tqdm import tqdm
@@ -89,7 +84,6 @@ def load_dataset_from_s3(s3_path):
 
 def main():
     args = convert_config_to_namespace("train_config.json")
-    set_seed(args.seed)
 
     logger = setup_logger(os.path.join(args.model_dir, 'train.log'))
     logger.info("===== Training Started =====")
@@ -104,9 +98,9 @@ def main():
     val_dataset = PhonemeTensorDataset(val_data)
     test_dataset = PhonemeTensorDataset(test_data)
 
-    train_loader = get_data_loader(train_dataset, batch_size=args.batch_size, shuffle=True, seed=args.seed)
-    val_loader = get_data_loader(val_dataset, batch_size=args.batch_size, shuffle=False, seed=args.seed)
-    test_loader = get_data_loader(test_dataset, batch_size=args.batch_size, shuffle=False, seed=args.seed)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logger.info(f"CUDA available: {torch.cuda.is_available()}")
