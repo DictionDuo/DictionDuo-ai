@@ -11,7 +11,6 @@ from preprocessing.split_dataset import split_metadata
 from preprocessing.frame_utils import pad_or_truncate_feature
 from preprocessing.label_utils import create_phoneme_label, create_error_label
 from utils.phoneme_utils import phoneme2index
-from utils.seed import set_seed
 
 MAX_FRAMES = 800  # 고정 mel 길이 (frame 단위)
 HOP_LENGTH = 160
@@ -95,7 +94,6 @@ def main():
     output_dir = "/home/ubuntu/preprocessed"
     os.makedirs(output_dir, exist_ok=True)
 
-    set_seed(42)
     metadata_list = build_metadata_list(wav_dir, json_dir)
     random.shuffle(metadata_list)
 
