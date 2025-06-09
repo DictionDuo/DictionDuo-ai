@@ -31,21 +31,60 @@ def calculate_per(pred_seq, label_seq):
 def train_one_epoch(model, loader, criterion, optimizer, device, logger):
     model.train()
     total_loss = 0.0
+    valid_batches = 0
 
     for features, labels, errors, input_lengths, label_lengths in tqdm(loader, desc="Training"):
         features, labels = features.to(device), labels.to(device)
         input_lengths, label_lengths = input_lengths.to(device), label_lengths.to(device)
 
-        outputs, output_lengths = model(features, input_lengths)
-        loss = criterion(outputs.transpose(0, 1).contiguous(), labels, output_lengths, label_lengths)
+        # [1] NaN / Inf 체크
+        if torch.isnan(features).any() or torch.isinf(features).any():
+            logger.error("[MEL ERROR] NaN or Inf in features")
+            continue
+        if torch.isnan(labels).any() or torch.isinf(labels).any():
+            logger.error("[LABEL ERROR] NaN or Inf in labels")
+            continue
+        if (input_lengths <= 0).any() or (label_lengths <= 0).any():
+            logger.error("[LENGTH ERROR] Non-positive input/label lengths")
+            continue
+
+        # [2] 값이 너무 큰 경우 체크
+        if (features.abs() > 1e4).any():
+            logger.warning("[MEL WARNING] Extremely large values in features")
+
+        # [3] Forward
+        try:
+            outputs, output_lengths = model(features, input_lengths)
+        except Exception as e:
+            logger.error(f"[FORWARD ERROR] {e}")
+            continue
+
+        # [4] Loss 계산
+        try:
+            loss = criterion(outputs.transpose(0, 1).contiguous(), labels, output_lengths, label_lengths)
+        except Exception as e:
+            logger.error(f"[LOSS COMPUTE ERROR] {e}")
+            continue
+
+        # [5] NaN or inf loss 체크
+        if torch.isnan(loss) or torch.isinf(loss):
+            logger.error("[LOSS ERROR] NaN or Inf in loss!")
+            logger.error(f"  - input_lengths: {input_lengths.tolist()}")
+            logger.error(f"  - label_lengths: {label_lengths.tolist()}")
+            logger.error(f"  - loss: {loss.item()}")
+            logger.error(f"  - features stats: mean={features.mean().item():.3f}, std={features.std().item():.3f}")
+            logger.error(f"  - labels unique: {torch.unique(labels)}")
+            continue
 
         optimizer.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
         optimizer.step()
 
         total_loss += loss.item()
+        valid_batches += 1
 
-    avg_loss = total_loss / len(loader)
+    avg_loss = total_loss / valid_batches if valid_batches > 0 else float("inf")
     logger.info(f"Train Loss: {avg_loss:.4f}")
     return avg_loss
 
@@ -59,17 +98,24 @@ def evaluate(model, loader, index2phoneme, device, logger, stage="Validation"):
             features, labels = features.to(device), labels.to(device)
             input_lengths, label_lengths = input_lengths.to(device), label_lengths.to(device)
 
-            outputs, output_lengths = model(features, input_lengths)
-            preds = outputs.argmax(dim=-1)
+            try:
+                outputs, output_lengths = model(features, input_lengths)
+                preds = outputs.argmax(dim=-1)
+            except Exception as e:
+                logger.error(f"[EVAL FORWARD ERROR] {e}")
+                continue
 
             for i in range(features.size(0)):
-                pred_seq = [index2phoneme[idx.item()] for idx in preds[i][:label_lengths[i]] if idx.item() != 0]
-                label_seq = [index2phoneme[idx.item()] for idx in labels[i][:label_lengths[i]] if idx.item() != 0]
-
-                per = calculate_per(pred_seq, label_seq)
-                total_per += per
-                total_samples += 1
-
+                try:
+                    pred_seq = [index2phoneme[idx.item()] for idx in preds[i][:label_lengths[i]] if idx.item() != 0]
+                    label_seq = [index2phoneme[idx.item()] for idx in labels[i][:label_lengths[i]] if idx.item() != 0]
+                    per = calculate_per(pred_seq, label_seq)
+                    total_per += per
+                    total_samples += 1
+                except Exception as e:
+                    logger.error(f"[EVAL DECODE ERROR] {e}")
+                    continue
+                
     avg_per = total_per / total_samples if total_samples > 0 else 0
     logger.info(f"{stage} PER: {avg_per:.2%}")
     return avg_per
@@ -116,7 +162,7 @@ def main():
         num_encoder_layers=2,
     ).to(device)
 
-    criterion = nn.CTCLoss(blank=0).to(device)
+    criterion = nn.CTCLoss(blank=0, zero_infinity=True).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
 
     index2phoneme = {v: k for k, v in phoneme2index.items()}
