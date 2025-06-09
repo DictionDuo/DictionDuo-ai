@@ -5,7 +5,7 @@ from datetime import datetime
 from torch.utils.data import DataLoader
 from conformer.model import Conformer
 from dataset.phoneme_tensor_dataset import PhonemeTensorDataset
-from utils.phoneme_utils import phoneme2index
+from utils.phoneme_utils import Korean, phoneme2index
 from utils.logger import setup_logger
 from utils.config_loader import convert_config_to_namespace
 from tqdm import tqdm
@@ -27,6 +27,10 @@ def calculate_per(pred_seq, label_seq):
     label_str = ' '.join(label_seq)
     distance = Levenshtein.distance(pred_str, label_str)
     return distance / max(len(label_seq), 1)
+
+def get_target_phoneme_indices(prompt_text, phoneme2index):
+    phoneme_seq = Korean.text_to_phoneme_sequence(prompt_text)
+    return [phoneme2index[p] for p in phoneme_seq if p in phoneme2index]
 
 def train_one_epoch(model, loader, criterion, optimizer, device, logger):
     model.train()
@@ -88,13 +92,13 @@ def train_one_epoch(model, loader, criterion, optimizer, device, logger):
     logger.info(f"Train Loss: {avg_loss:.4f}")
     return avg_loss
 
-def evaluate(model, loader, index2phoneme, device, logger, stage="Validation"):
+def evaluate(model, loader, index2phoneme, phoneme2index, device, logger, stage="Validation"):
     model.eval()
     total_per = 0.0
     total_samples = 0
 
     with torch.no_grad():
-        for features, labels, errors, input_lengths, label_lengths in tqdm(loader, desc=f"Evaluating {stage}"):
+        for features, labels, errors, input_lengths, label_lengths, metas in tqdm(loader, desc=f"Evaluating {stage}"):
             features, labels = features.to(device), labels.to(device)
             input_lengths, label_lengths = input_lengths.to(device), label_lengths.to(device)
 
@@ -107,11 +111,28 @@ def evaluate(model, loader, index2phoneme, device, logger, stage="Validation"):
 
             for i in range(features.size(0)):
                 try:
-                    pred_seq = [index2phoneme[idx.item()] for idx in preds[i][:label_lengths[i]] if idx.item() != 0]
-                    label_seq = [index2phoneme[idx.item()] for idx in labels[i][:label_lengths[i]] if idx.item() != 0]
+                    meta = metas[i]
+                    with open(meta["json"], encoding="utf-8") as f:
+                        meta_json = json.load(f)
+
+                    prompt_text = meta_json["RecordingMetadata"]["prompt"]
+                    target_ids = get_target_phoneme_indices(prompt_text, phoneme2index)
+                    pred_ids = preds[i][:input_lengths[i]].tolist()
+
+                    decoded_pred = []
+                    prev = None
+                    for p in pred_ids:
+                        if p != 0 and p != prev:
+                            decoded_pred.append(p)
+                        prev = p
+
+                    pred_seq = [index2phoneme[idx] for idx in decoded_pred if idx in index2phoneme]
+                    label_seq = [index2phoneme[idx] for idx in target_ids if idx in index2phoneme]
+
                     per = calculate_per(pred_seq, label_seq)
                     total_per += per
                     total_samples += 1
+
                 except Exception as e:
                     logger.error(f"[EVAL DECODE ERROR] {e}")
                     continue
@@ -140,9 +161,9 @@ def main():
     val_data = load_dataset_from_s3(args.val_dataset_path)
     test_data = load_dataset_from_s3(args.test_dataset_path)
 
-    train_dataset = PhonemeTensorDataset(train_data)
-    val_dataset = PhonemeTensorDataset(val_data)
-    test_dataset = PhonemeTensorDataset(test_data)
+    train_dataset = PhonemeTensorDataset(train_data, meta_list=train_data["metas"])
+    val_dataset = PhonemeTensorDataset(val_data, meta_list=val_data["metas"])
+    test_dataset = PhonemeTensorDataset(test_data, meta_list=test_data["metas"])
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
@@ -172,7 +193,7 @@ def main():
         avg_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, logger)
 
         if (epoch + 1) % args.eval_interval == 0 or (epoch + 1) == args.epochs:
-            avg_per = evaluate(model, val_loader, index2phoneme, device, logger, stage="Validation")
+            avg_per = evaluate(model, val_loader, index2phoneme, phoneme2index, device, logger, stage="Validation")
 
     os.makedirs(args.model_dir, exist_ok=True)
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -186,7 +207,7 @@ def main():
         logger.info(f"Uploaded to s3://{args.upload_bucket}/{args.upload_path}")
 
     logger.info("===== Running Final Test Evaluation =====")
-    evaluate(model, test_loader, index2phoneme, device, logger, stage="Test")
+    evaluate(model, test_loader, index2phoneme, phoneme2index, device, logger, stage="Test")
     logger.info("===== Training + Evaluation Completed =====")
 
 if __name__ == "__main__":
