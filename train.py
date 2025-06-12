@@ -5,7 +5,7 @@ from datetime import datetime
 from torch.utils.data import DataLoader
 from conformer.model import Conformer
 from dataset.phoneme_tensor_dataset import PhonemeTensorDataset
-from utils.phoneme_utils import Korean, phoneme2index
+from utils.phoneme_utils import phoneme2index
 from utils.logger import setup_logger
 from utils.config_loader import convert_config_to_namespace
 from tqdm import tqdm
@@ -28,16 +28,12 @@ def calculate_per(pred_seq, label_seq):
     distance = Levenshtein.distance(pred_str, label_str)
     return distance / max(len(label_seq), 1)
 
-def get_target_phoneme_indices(prompt_text, phoneme2index):
-    phoneme_seq = Korean.text_to_phoneme_sequence(prompt_text)
-    return [phoneme2index[p] for p in phoneme_seq if p in phoneme2index]
-
 def train_one_epoch(model, loader, criterion, optimizer, device, logger):
     model.train()
     total_loss = 0.0
     valid_batches = 0
 
-    for features, labels, errors, input_lengths, label_lengths in tqdm(loader, desc="Training"):
+    for features, labels, phones_actual, errors, input_lengths, label_lengths, metas in tqdm(loader, desc="Training"):
         features, labels = features.to(device), labels.to(device)
         input_lengths, label_lengths = input_lengths.to(device), label_lengths.to(device)
 
@@ -73,11 +69,6 @@ def train_one_epoch(model, loader, criterion, optimizer, device, logger):
         # [5] NaN or inf loss 체크
         if torch.isnan(loss) or torch.isinf(loss):
             logger.error("[LOSS ERROR] NaN or Inf in loss!")
-            logger.error(f"  - input_lengths: {input_lengths.tolist()}")
-            logger.error(f"  - label_lengths: {label_lengths.tolist()}")
-            logger.error(f"  - loss: {loss.item()}")
-            logger.error(f"  - features stats: mean={features.mean().item():.3f}, std={features.std().item():.3f}")
-            logger.error(f"  - labels unique: {torch.unique(labels)}")
             continue
 
         optimizer.zero_grad()
@@ -92,14 +83,15 @@ def train_one_epoch(model, loader, criterion, optimizer, device, logger):
     logger.info(f"Train Loss: {avg_loss:.4f}")
     return avg_loss
 
-def evaluate(model, loader, index2phoneme, phoneme2index, device, logger, stage="Validation"):
+def evaluate(model, loader, index2phoneme, device, logger, stage="Validation"):
     model.eval()
-    total_per = 0.0
+    total_per_label = 0.0
+    total_per_actual = 0.0
     total_samples = 0
 
     with torch.no_grad():
-        for features, labels, errors, input_lengths, label_lengths, metas in tqdm(loader, desc=f"Evaluating {stage}"):
-            features, labels = features.to(device), labels.to(device)
+        for features, labels, phones_actual, errors, input_lengths, label_lengths, metas in tqdm(loader, desc=f"Evaluating {stage}"):
+            features, labels, phones_actual = features.to(device), labels.to(device), phones_actual.to(device)
             input_lengths, label_lengths = input_lengths.to(device), label_lengths.to(device)
 
             try:
@@ -111,14 +103,7 @@ def evaluate(model, loader, index2phoneme, phoneme2index, device, logger, stage=
 
             for i in range(features.size(0)):
                 try:
-                    meta = metas[i]
-                    with open(meta["json"], encoding="utf-8") as f:
-                        meta_json = json.load(f)
-
-                    prompt_text = meta_json["RecordingMetadata"]["prompt"]
-                    target_ids = get_target_phoneme_indices(prompt_text, phoneme2index)
                     pred_ids = preds[i][:input_lengths[i]].tolist()
-
                     decoded_pred = []
                     prev = None
                     for p in pred_ids:
@@ -127,19 +112,26 @@ def evaluate(model, loader, index2phoneme, phoneme2index, device, logger, stage=
                         prev = p
 
                     pred_seq = [index2phoneme[idx] for idx in decoded_pred if idx in index2phoneme]
-                    label_seq = [index2phoneme[idx] for idx in target_ids if idx in index2phoneme]
+                    label_seq = [index2phoneme[idx] for idx in labels[i][:label_lengths[i]] if idx.item() in index2phoneme]
+                    actual_seq = [index2phoneme[idx.item()] for idx in phones_actual[i][:label_lengths[i]] if idx.item() in index2phoneme]
 
-                    per = calculate_per(pred_seq, label_seq)
-                    total_per += per
+                    per_label = calculate_per(pred_seq, label_seq)
+                    per_actual = calculate_per(pred_seq, actual_seq)
+
+                    total_per_label += per_label
+                    total_per_actual += per_actual
                     total_samples += 1
+
+                    logger.debug(f"Sample {i} | Pred: {''.join(pred_seq)} | Label: {''.join(label_seq)} | Actual: {''.join(actual_seq)} | PER(label): {per_label:.2%}, PER(actual): {per_actual:.2%}")
 
                 except Exception as e:
                     logger.error(f"[EVAL DECODE ERROR] {e}")
                     continue
                 
-    avg_per = total_per / total_samples if total_samples > 0 else 0
-    logger.info(f"{stage} PER: {avg_per:.2%}")
-    return avg_per
+    avg_per_label = total_per_label / total_samples if total_samples > 0 else 0
+    avg_per_actual = total_per_actual / total_samples if total_samples > 0 else 0
+    logger.info(f"{stage} PER(label): {avg_per_label:.2%}, PER(actual): {avg_per_actual:.2%}")
+    return avg_per_label, avg_per_actual
 
 def load_dataset_from_s3(s3_path):
     bucket = s3_path.split('/')[2]
@@ -193,7 +185,7 @@ def main():
         avg_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, logger)
 
         if (epoch + 1) % args.eval_interval == 0 or (epoch + 1) == args.epochs:
-            avg_per = evaluate(model, val_loader, index2phoneme, phoneme2index, device, logger, stage="Validation")
+            evaluate(model, val_loader, index2phoneme, phoneme2index, device, logger, stage="Validation")
 
     os.makedirs(args.model_dir, exist_ok=True)
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -207,7 +199,7 @@ def main():
         logger.info(f"Uploaded to s3://{args.upload_bucket}/{args.upload_path}")
 
     logger.info("===== Running Final Test Evaluation =====")
-    evaluate(model, test_loader, index2phoneme, phoneme2index, device, logger, stage="Test")
+    evaluate(model, test_loader, index2phoneme, device, logger, stage="Test")
     logger.info("===== Training + Evaluation Completed =====")
 
 if __name__ == "__main__":
