@@ -7,3 +7,6 @@ librosa
 scipy
 soundfile
 python-Levenshtein
+matplotlib
+seaborn
+scikit-learn
