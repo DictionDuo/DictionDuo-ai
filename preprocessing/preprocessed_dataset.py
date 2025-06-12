@@ -37,6 +37,8 @@ def build_tensor_dataset(split_list, split_name, output_dir):
     with open("utils/error_class_map.json", encoding="utf-8") as f:
         error_map = json.load(f)
 
+    korean = Korean()
+
     for meta in tqdm(split_list, desc=f"Processing {split_name}"):
         try:
             # 손상된 WAV 파일 사전 필터링
@@ -67,7 +69,7 @@ def build_tensor_dataset(split_list, split_name, output_dir):
                 continue
 
             prompt = meta_json["RecordingMetadata"].get("prompt", "")
-            phoneme_seq = Korean.text_to_phoneme_sequence(prompt)
+            phoneme_seq = korean.text_to_phoneme_sequence(prompt, phoneme2index)
             phoneme_indices = [phoneme2index[p] for p in phoneme_seq if p in phoneme2index]
             phoneme_padded = pad_or_truncate_feature(phoneme_indices, MAX_FRAMES, fill_value=0)
 
