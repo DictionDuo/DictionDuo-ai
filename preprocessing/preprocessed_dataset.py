@@ -58,7 +58,13 @@ def build_tensor_dataset(split_list, split_name, output_dir):
             with open(meta["json"], encoding="utf-8") as f:
                 meta_json = json.load(f)
 
-            phones = meta_json["RecordingMetadata"]["phonemic"]["phones"]
+            try:
+                phones = meta_json["RecordingMetadata"]["phonemic"]["phones"]
+            except KeyError:
+                print(f"[SKIP] Missing phonemic/phones: {meta['json']}")
+                skipped.append(meta)
+                continue
+            
             errors = meta_json["RecordingMetadata"]["phonemic"].get("error_tags", [])
 
             phoneme_label = create_phoneme_label(phones, MAX_FRAMES, phoneme2index, SAMPLING_RATE, HOP_LENGTH)
