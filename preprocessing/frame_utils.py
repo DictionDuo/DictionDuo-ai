@@ -1,6 +1,7 @@
 import numpy as np
 
 def pad_or_truncate_feature(feature, max_frames, fill_value=0):
+    feature = np.array(feature)
     if len(feature) > max_frames:
         return feature[:max_frames]
     elif len(feature) < max_frames:
