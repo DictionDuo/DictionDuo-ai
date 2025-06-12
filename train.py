@@ -5,7 +5,7 @@ from datetime import datetime
 from torch.utils.data import DataLoader
 from conformer.model import Conformer
 from dataset.phoneme_tensor_dataset import PhonemeTensorDataset
-from utils.phoneme_utils import phoneme2index
+from utils.phoneme_utils import Korean, phoneme2index
 from utils.logger import setup_logger
 from utils.config_loader import convert_config_to_namespace
 from tqdm import tqdm
@@ -108,6 +108,11 @@ def evaluate(model, loader, index2phoneme, device, logger, stage="Validation"):
 
             for i in range(features.size(0)):
                 try:
+                    with open(metas[i]["json"], encoding="utf-8") as f:
+                        meta_json = json.load(f)
+                    prompt_text = meta_json["RecordingMetadata"]["prompt"]
+                    target_ids = Korean.text_to_phoneme_sequence(prompt_text, phoneme2index)
+
                     pred_ids = preds[i][:input_lengths[i]].tolist()
                     decoded_pred = []
                     prev = None
@@ -117,7 +122,7 @@ def evaluate(model, loader, index2phoneme, device, logger, stage="Validation"):
                         prev = p
 
                     pred_seq = [index2phoneme[idx] for idx in decoded_pred if idx in index2phoneme]
-                    label_seq = [index2phoneme[idx.item()] for idx in labels[i][:label_lengths[i]] if idx.item() in index2phoneme]
+                    label_seq = [index2phoneme[idx] for idx in target_ids if idx in index2phoneme]
                     actual_seq = [index2phoneme[idx.item()] for idx in phones_actual[i][:label_lengths[i]] if idx.item() in index2phoneme]
 
                     per_label = calculate_per(pred_seq, label_seq)
@@ -128,7 +133,7 @@ def evaluate(model, loader, index2phoneme, device, logger, stage="Validation"):
                     total_samples += 1
 
                     all_preds.extend(decoded_pred)
-                    all_labels.extend([idx.item() for idx in labels[i][:label_lengths[i]]])
+                    all_labels.extend(target_ids)
 
                     logger.debug(f"Sample {i} | Pred: {''.join(pred_seq)} | Label: {''.join(label_seq)} | Actual: {''.join(actual_seq)} | PER(label): {per_label:.2%}, PER(actual): {per_actual:.2%}")
 
