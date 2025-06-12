@@ -12,6 +12,9 @@ from tqdm import tqdm
 import Levenshtein
 import json
 import boto3
+from sklearn.metrics import confusion_matrix
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 def download_from_s3(bucket_name, s3_key, local_path):
     s3 = boto3.client('s3')
@@ -88,6 +91,8 @@ def evaluate(model, loader, index2phoneme, device, logger, stage="Validation"):
     total_per_label = 0.0
     total_per_actual = 0.0
     total_samples = 0
+    all_preds = []
+    all_labels = []
 
     with torch.no_grad():
         for features, labels, phones_actual, errors, input_lengths, label_lengths, metas in tqdm(loader, desc=f"Evaluating {stage}"):
@@ -112,7 +117,7 @@ def evaluate(model, loader, index2phoneme, device, logger, stage="Validation"):
                         prev = p
 
                     pred_seq = [index2phoneme[idx] for idx in decoded_pred if idx in index2phoneme]
-                    label_seq = [index2phoneme[idx] for idx in labels[i][:label_lengths[i]] if idx.item() in index2phoneme]
+                    label_seq = [index2phoneme[idx.item()] for idx in labels[i][:label_lengths[i]] if idx.item() in index2phoneme]
                     actual_seq = [index2phoneme[idx.item()] for idx in phones_actual[i][:label_lengths[i]] if idx.item() in index2phoneme]
 
                     per_label = calculate_per(pred_seq, label_seq)
@@ -121,6 +126,9 @@ def evaluate(model, loader, index2phoneme, device, logger, stage="Validation"):
                     total_per_label += per_label
                     total_per_actual += per_actual
                     total_samples += 1
+
+                    all_preds.extend(decoded_pred)
+                    all_labels.extend([idx.item() for idx in labels[i][:label_lengths[i]]])
 
                     logger.debug(f"Sample {i} | Pred: {''.join(pred_seq)} | Label: {''.join(label_seq)} | Actual: {''.join(actual_seq)} | PER(label): {per_label:.2%}, PER(actual): {per_actual:.2%}")
 
@@ -131,6 +139,17 @@ def evaluate(model, loader, index2phoneme, device, logger, stage="Validation"):
     avg_per_label = total_per_label / total_samples if total_samples > 0 else 0
     avg_per_actual = total_per_actual / total_samples if total_samples > 0 else 0
     logger.info(f"{stage} PER(label): {avg_per_label:.2%}, PER(actual): {avg_per_actual:.2%}")
+
+    cm = confusion_matrix(all_labels, all_preds, labels=list(index2phoneme.keys()))
+    plt.figure(figsize=(12, 10))
+    sns.heatmap(cm, annot=False, xticklabels=index2phoneme.values(), yticklabels=index2phoneme.values(), cmap='Blues')
+    plt.xlabel('Predicted')
+    plt.ylabel('True')
+    plt.title(f'Confusion Matrix ({stage})')
+    plt.tight_layout()
+    plt.savefig(f"confusion_matrix_{stage.lower()}.png")
+    logger.info(f"Confusion matrix saved to confusion_matrix_{stage.lower()}.png")
+
     return avg_per_label, avg_per_actual
 
 def load_dataset_from_s3(s3_path):
@@ -185,7 +204,7 @@ def main():
         avg_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, logger)
 
         if (epoch + 1) % args.eval_interval == 0 or (epoch + 1) == args.epochs:
-            evaluate(model, val_loader, index2phoneme, phoneme2index, device, logger, stage="Validation")
+            evaluate(model, val_loader, index2phoneme, device, logger, stage="Validation")
 
     os.makedirs(args.model_dir, exist_ok=True)
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
