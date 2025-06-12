@@ -1,8 +1,6 @@
 import glob
 import os
 import json
-from preprocessing.feature_extraction import extract_features
-from utils.phoneme_utils import Korean
 
 def build_metadata_list(wav_dir, json_dir):
     metadata_list = []
@@ -14,18 +12,3 @@ def build_metadata_list(wav_dir, json_dir):
         else:
             print(f"[Warning] JSON not found for {basename}")
     return metadata_list
-
-def get_max_lengths(metadata_list, phoneme2index):
-    max_mel = 0
-    max_label = 0
-    for meta in metadata_list:
-        mel = extract_features(meta["wav"])
-        if mel is not None:
-            max_mel = max(max_mel, mel.shape[0])
-        with open(meta["json"], encoding="utf-8") as f:
-            data = json.load(f)
-        text = data.get("transcription", {}).get("AnswerLabelText") or data.get("RecordingMetadata", {}).get("prompt")
-        if text:
-            label_seq = Korean.text_to_phoneme_sequence(text, phoneme2index)
-            max_label = max(max_label, len(label_seq))
-    return max_mel, max_label
