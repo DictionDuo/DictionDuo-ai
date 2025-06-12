@@ -12,7 +12,7 @@ from preprocessing.frame_utils import pad_or_truncate_feature
 from preprocessing.label_utils import create_phoneme_label, create_error_label
 from utils.phoneme_utils import phoneme2index
 
-MAX_FRAMES = 800  # 고정 mel 길이 (frame 단위)
+MAX_FRAMES = 512  # 고정 mel 길이 (frame 단위)
 HOP_LENGTH = 160
 SAMPLING_RATE = 16000
 
@@ -64,7 +64,7 @@ def build_tensor_dataset(split_list, split_name, output_dir):
                 print(f"[SKIP] Missing phonemic/phones: {meta['json']}")
                 skipped.append(meta)
                 continue
-            
+
             errors = meta_json["RecordingMetadata"]["phonemic"].get("error_tags", [])
 
             phoneme_label = create_phoneme_label(phones, MAX_FRAMES, phoneme2index, SAMPLING_RATE, HOP_LENGTH)
