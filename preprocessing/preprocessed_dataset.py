@@ -10,7 +10,7 @@ from preprocessing.build_dataset import build_metadata_list
 from preprocessing.split_dataset import split_metadata
 from preprocessing.frame_utils import pad_or_truncate_feature
 from preprocessing.label_utils import create_phoneme_label, create_error_label
-from utils.phoneme_utils import phoneme2index
+from utils.phoneme_utils import Korean, phoneme2index
 
 MAX_FRAMES = 512  # 고정 mel 길이 (frame 단위)
 HOP_LENGTH = 160
@@ -28,6 +28,7 @@ def build_tensor_dataset(split_list, split_name, output_dir):
     skipped = []
     mel_list = []
     phoneme_list = []
+    phones_actual_list = []
     error_list = []
     lengths = []
     label_lengths = []
@@ -65,16 +66,21 @@ def build_tensor_dataset(split_list, split_name, output_dir):
                 skipped.append(meta)
                 continue
 
-            errors = meta_json["RecordingMetadata"]["phonemic"].get("error_tags", [])
+            prompt = meta_json["RecordingMetadata"].get("prompt", "")
+            phoneme_seq = Korean.text_to_phoneme_sequence(prompt)
+            phoneme_indices = [phoneme2index[p] for p in phoneme_seq if p in phoneme2index]
+            phoneme_padded = pad_or_truncate_feature(phoneme_indices, MAX_FRAMES, fill_value=0)
 
-            phoneme_label = create_phoneme_label(phones, MAX_FRAMES, phoneme2index, SAMPLING_RATE, HOP_LENGTH)
+            phones_actual = create_phoneme_label(phones, MAX_FRAMES, phoneme2index, SAMPLING_RATE, HOP_LENGTH)
+            errors = meta_json["RecordingMetadata"]["phonemic"].get("error_tags", [])
             error_label = create_error_label(errors, MAX_FRAMES, error_map, SAMPLING_RATE, HOP_LENGTH)
 
             mel_list.append(torch.tensor(mel_padded, dtype=torch.float32))
-            phoneme_list.append(torch.tensor(phoneme_label))
+            phoneme_list.append(torch.tensor(phoneme_padded))
+            phones_actual_list.append(torch.tensor(phones_actual))
             error_list.append(torch.tensor(error_label))
             lengths.append(original_len)
-            label_lengths.append(int((phoneme_label != 0).sum()))
+            label_lengths.append(int((np.array(phoneme_padded) != 0).sum()))
             meta_list.append(meta)
 
         except Exception as e:
@@ -85,6 +91,7 @@ def build_tensor_dataset(split_list, split_name, output_dir):
         torch.save({
             "mels": torch.stack(mel_list),
             "phonemes": torch.stack(phoneme_list),
+            "phones_actual": torch.stack(phones_actual_list),
             "errors": torch.stack(error_list),
             "input_lengths": lengths,
             "label_lengths": label_lengths,
