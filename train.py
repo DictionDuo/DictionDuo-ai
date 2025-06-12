@@ -94,6 +94,8 @@ def evaluate(model, loader, index2phoneme, device, logger, stage="Validation"):
     all_preds = []
     all_labels = []
 
+    korean = Korean()
+
     with torch.no_grad():
         for features, labels, phones_actual, errors, input_lengths, label_lengths, metas in tqdm(loader, desc=f"Evaluating {stage}"):
             features, labels, phones_actual = features.to(device), labels.to(device), phones_actual.to(device)
@@ -111,7 +113,7 @@ def evaluate(model, loader, index2phoneme, device, logger, stage="Validation"):
                     with open(metas[i]["json"], encoding="utf-8") as f:
                         meta_json = json.load(f)
                     prompt_text = meta_json["RecordingMetadata"]["prompt"]
-                    target_ids = Korean.text_to_phoneme_sequence(prompt_text, phoneme2index)
+                    target_ids = korean.text_to_phoneme_sequence(prompt_text, phoneme2index)
 
                     pred_ids = preds[i][:input_lengths[i]].tolist()
                     decoded_pred = []
