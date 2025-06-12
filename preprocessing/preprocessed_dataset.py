@@ -78,11 +78,12 @@ def build_tensor_dataset(split_list, split_name, output_dir):
             error_label = create_error_label(errors, MAX_FRAMES, error_map, SAMPLING_RATE, HOP_LENGTH)
 
             mel_list.append(torch.tensor(mel_padded, dtype=torch.float32))
-            phoneme_list.append(torch.tensor(phoneme_padded))
+            phoneme_tensor = torch.tensor(phoneme_padded)
+            phoneme_list.append(phoneme_tensor)
             phones_actual_list.append(torch.tensor(phones_actual))
             error_list.append(torch.tensor(error_label))
             lengths.append(original_len)
-            label_lengths.append(int((np.array(phoneme_padded) != 0).sum()))
+            label_lengths.append(int((phoneme_tensor != 0).sum().item()))
             meta_list.append(meta)
 
         except Exception as e:
