@@ -10,7 +10,7 @@ from preprocessing.build_dataset import build_metadata_list
 from preprocessing.split_dataset import split_metadata
 from preprocessing.frame_utils import pad_or_truncate_feature
 from preprocessing.label_utils import create_phoneme_label, create_error_label
-from utils.phoneme_utils import Korean, phoneme2index
+from utils.phoneme_utils import Korean, phoneme2index, convert_prompt_to_phoneme_sequence
 
 MAX_FRAMES = 512  # 고정 mel 길이 (frame 단위)
 HOP_LENGTH = 160
@@ -69,8 +69,12 @@ def build_tensor_dataset(split_list, split_name, output_dir):
                 continue
 
             prompt = meta_json["RecordingMetadata"].get("prompt", "")
-            phoneme_seq = korean.text_to_phoneme_sequence(prompt, phoneme2index)
-            phoneme_indices = [phoneme2index[p] for p in phoneme_seq if p in phoneme2index]
+            phoneme_indices = convert_prompt_to_phoneme_sequence(prompt, phoneme2index, korean)
+            
+            if not phoneme_indices:
+                skipped.append(meta)
+                continue
+
             phoneme_padded = pad_or_truncate_feature(phoneme_indices, MAX_FRAMES, fill_value=0)
             phoneme_tensor = torch.tensor(phoneme_padded)
 
