@@ -55,6 +55,7 @@ def build_tensor_dataset(split_list, split_name, output_dir):
                 continue
 
             mel_np = mel.cpu().numpy()
+            original_len = len(mel_np)
             mel_padded = pad_or_truncate_feature(mel_np, MAX_FRAMES, fill_value=0)
 
             with open(meta["json"], encoding="utf-8") as f:
@@ -77,7 +78,7 @@ def build_tensor_dataset(split_list, split_name, output_dir):
             errors = meta_json["RecordingMetadata"]["phonemic"].get("error_tags", [])
             error_label = create_error_label(errors, MAX_FRAMES, error_map, SAMPLING_RATE, HOP_LENGTH)
 
-            input_length = int((np.sum(mel_padded, axis=1) != 0).sum())
+            input_length = min(original_len, MAX_FRAMES)
             label_length = int((phoneme_tensor != 0).sum().item())
 
             if input_length == 0 or label_length == 0:
