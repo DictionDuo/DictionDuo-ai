@@ -1,3 +1,4 @@
+import re
 import json
 
 class Korean:
@@ -46,6 +47,24 @@ class Korean:
             elif c:
                 seq.append(phoneme2index.get(c, 0))
         return seq
+
+def clean_korean_text(text: str) -> str:
+    return re.sub(r"[^가-힣]", "", text)
+
+def convert_prompt_to_phoneme_sequence(prompt: str, phoneme2index: dict, korean: Korean) -> list:
+    cleaned = clean_korean_text(prompt)
+
+    if not cleaned:
+        print(f"[SKIP] Prompt cleaned to empty: '{prompt}'")
+        return []
+
+    phoneme_seq = korean.text_to_phoneme_sequence(cleaned, phoneme2index)
+
+    if not phoneme_seq:
+        print(f"[SKIP] Phoneme sequence empty after mapping: '{cleaned}' ← '{prompt}'")
+        return []
+
+    return phoneme_seq
 
 # Generate phoneme2index dictionary
 phoneme_set = set(Korean.phoneme_onset_list + Korean.phoneme_nucleus_list + Korean.phoneme_coda_list)
