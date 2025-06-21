@@ -55,7 +55,6 @@ def build_tensor_dataset(split_list, split_name, output_dir):
                 continue
 
             mel_np = mel.cpu().numpy()
-            original_len = min(len(mel_np), MAX_FRAMES)
             mel_padded = pad_or_truncate_feature(mel_np, MAX_FRAMES, fill_value=0)
 
             with open(meta["json"], encoding="utf-8") as f:
@@ -72,18 +71,26 @@ def build_tensor_dataset(split_list, split_name, output_dir):
             phoneme_seq = korean.text_to_phoneme_sequence(prompt, phoneme2index)
             phoneme_indices = [phoneme2index[p] for p in phoneme_seq if p in phoneme2index]
             phoneme_padded = pad_or_truncate_feature(phoneme_indices, MAX_FRAMES, fill_value=0)
+            phoneme_tensor = torch.tensor(phoneme_padded)
 
             phones_actual = create_phoneme_label(phones, MAX_FRAMES, phoneme2index, SAMPLING_RATE, HOP_LENGTH)
             errors = meta_json["RecordingMetadata"]["phonemic"].get("error_tags", [])
             error_label = create_error_label(errors, MAX_FRAMES, error_map, SAMPLING_RATE, HOP_LENGTH)
 
+            input_length = int((np.sum(mel_padded, axis=1) != 0).sum())
+            label_length = int((phoneme_tensor != 0).sum().item())
+
+            if input_length == 0 or label_length == 0:
+                print(f"[SKIP] Zero length input/label: {meta['wav']}")
+                skipped.append(meta)
+                continue
+
             mel_list.append(torch.tensor(mel_padded, dtype=torch.float32))
-            phoneme_tensor = torch.tensor(phoneme_padded)
             phoneme_list.append(phoneme_tensor)
             phones_actual_list.append(torch.tensor(phones_actual))
             error_list.append(torch.tensor(error_label))
-            lengths.append(original_len)
-            label_lengths.append(int((phoneme_tensor != 0).sum().item()))
+            lengths.append(input_length)
+            label_lengths.append(label_length)
             meta_list.append(meta)
 
         except Exception as e:
