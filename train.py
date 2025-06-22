@@ -86,6 +86,16 @@ def train_one_epoch(model, loader, criterion, optimizer, device, logger):
     logger.info(f"Train Loss: {avg_loss:.4f}")
     return avg_loss
 
+def greedy_ctc_decode(pred_tensor, input_len, blank=0):
+    decoded = []
+    prev = None
+    for i in range(input_len):
+        curr = pred_tensor[i].item()
+        if curr != blank and curr != prev:
+            decoded.append(curr)
+        prev = curr
+    return decoded
+
 def evaluate(model, loader, index2phoneme, phoneme2index, device, logger, stage="Validation"):
     model.eval()
     total_per_label = 0.0
@@ -115,17 +125,11 @@ def evaluate(model, loader, index2phoneme, phoneme2index, device, logger, stage=
                     prompt_text = meta_json["RecordingMetadata"]["prompt"]
                     target_ids = korean.text_to_phoneme_sequence(prompt_text, phoneme2index)
 
-                    pred_ids = preds[i][:input_lengths[i]].tolist()
-                    decoded_pred = []
-                    prev = None
-                    for p in pred_ids:
-                        if p != 0 and p != prev:
-                            decoded_pred.append(p)
-                        prev = p
+                    pred_ids = greedy_ctc_decode(preds[i], output_lengths[i], blank=0)
 
-                    pred_seq = [index2phoneme[idx] for idx in decoded_pred if idx in index2phoneme]
+                    pred_seq = [index2phoneme[idx] for idx in pred_ids if idx in index2phoneme]
                     label_seq = [index2phoneme[idx] for idx in target_ids if idx in index2phoneme]
-                    actual_seq = [index2phoneme[idx.item()] for idx in phones_actual[i][:label_lengths[i]] if idx.item() in index2phoneme]
+                    actual_seq = [index2phoneme[idx.item()] for idx in phones_actual[i][:input_lengths[i]] if idx.item() in index2phoneme]
 
                     per_label = calculate_per(pred_seq, label_seq)
                     per_actual = calculate_per(pred_seq, actual_seq)
@@ -134,7 +138,7 @@ def evaluate(model, loader, index2phoneme, phoneme2index, device, logger, stage=
                     total_per_actual += per_actual
                     total_samples += 1
 
-                    all_preds.extend(decoded_pred)
+                    all_preds.extend(pred_ids)
                     all_labels.extend(target_ids)
 
                     logger.debug(f"Sample {i} | Pred: {''.join(pred_seq)} | Label: {''.join(label_seq)} | Actual: {''.join(actual_seq)} | PER(label): {per_label:.2%}, PER(actual): {per_actual:.2%}")
@@ -147,7 +151,7 @@ def evaluate(model, loader, index2phoneme, phoneme2index, device, logger, stage=
     avg_per_actual = total_per_actual / total_samples if total_samples > 0 else 0
     logger.info(f"{stage} PER(label): {avg_per_label:.2%}, PER(actual): {avg_per_actual:.2%}")
 
-    cm = confusion_matrix(all_labels, all_preds, labels=list(index2phoneme.keys()))
+    cm = confusion_matrix(all_labels, all_preds, labels=sorted(index2phoneme.keys()))
     plt.figure(figsize=(12, 10))
     sns.heatmap(cm, annot=False, xticklabels=index2phoneme.values(), yticklabels=index2phoneme.values(), cmap='Blues')
     plt.xlabel('Predicted')
