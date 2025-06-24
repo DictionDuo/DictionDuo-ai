@@ -130,7 +130,7 @@ def evaluate(model, loader, index2phoneme, phoneme2index, device, logger, stage=
 
                     with open(metas[i]["json"], encoding="utf-8") as f:
                         meta_json = json.load(f)
-                        
+
                     prompt_text = meta_json["RecordingMetadata"]["prompt"]
                     target_ids = korean.text_to_phoneme_sequence(prompt_text, phoneme2index)
 
@@ -192,9 +192,9 @@ def main():
     val_data = load_dataset_from_s3(args.val_dataset_path)
     test_data = load_dataset_from_s3(args.test_dataset_path)
 
-    train_dataset = PhonemeTensorDataset(train_data, meta_dict_list=train_data["metas"])
-    val_dataset = PhonemeTensorDataset(val_data, meta_dict_list=val_data["metas"])
-    test_dataset = PhonemeTensorDataset(test_data, meta_dict_list=test_data["metas"])
+    train_dataset = PhonemeTensorDataset(train_data, meta_list=train_data["metas"])
+    val_dataset = PhonemeTensorDataset(val_data, meta_list=val_data["metas"])
+    test_dataset = PhonemeTensorDataset(test_data, meta_list=test_data["metas"])
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
