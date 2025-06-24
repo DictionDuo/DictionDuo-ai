@@ -111,6 +111,9 @@ def evaluate(model, loader, index2phoneme, phoneme2index, device, logger, stage=
             features, labels, phones_actual = features.to(device), labels.to(device), phones_actual.to(device)
             input_lengths, label_lengths = input_lengths.to(device), label_lengths.to(device)
 
+            if isinstance(metas, dict):
+                metas = [metas[k] for k in sorted(metas.keys())]
+
             try:
                 outputs, output_lengths = model(features, input_lengths)
                 preds = outputs.argmax(dim=-1)
@@ -120,8 +123,14 @@ def evaluate(model, loader, index2phoneme, phoneme2index, device, logger, stage=
 
             for i in range(features.size(0)):
                 try:
+                    json_path = metas[i]
+                    if not os.path.exists(json_path):
+                        logger.error(f"[EVAL DECODE ERROR] File not found: {json_path}")
+                        continue
+
                     with open(metas[i]["json"], encoding="utf-8") as f:
                         meta_json = json.load(f)
+                        
                     prompt_text = meta_json["RecordingMetadata"]["prompt"]
                     target_ids = korean.text_to_phoneme_sequence(prompt_text, phoneme2index)
 
