@@ -33,7 +33,7 @@ def train_one_epoch(model, loader, criterion, optimizer, device, logger):
     total_loss = 0.0
     valid_batches = 0
 
-    for features, labels, phones_actual, errors, input_lengths, label_lengths, metas in tqdm(loader, desc="Training"):
+    for features, labels, _, errors, input_lengths, label_lengths, metas in tqdm(loader, desc="Training"):
         features, labels = features.to(device), labels.to(device)
         input_lengths, label_lengths = input_lengths.to(device), label_lengths.to(device)
 
@@ -105,7 +105,6 @@ def fetch_json_from_s3(bucket, key):
 def evaluate(model, loader, index2phoneme, phoneme2index, device, logger, stage="Validation"):
     model.eval()
     total_per_label = 0.0
-    total_per_actual = 0.0
     total_samples = 0
     all_preds = []
     all_labels = []
@@ -115,8 +114,8 @@ def evaluate(model, loader, index2phoneme, phoneme2index, device, logger, stage=
     json_prefix = "json"
 
     with torch.no_grad():
-        for features, labels, phones_actual, errors, input_lengths, label_lengths, metas in tqdm(loader, desc=f"Evaluating {stage}"):
-            features, labels, phones_actual = features.to(device), labels.to(device), phones_actual.to(device)
+        for features, labels, _, errors, input_lengths, label_lengths, metas in tqdm(loader, desc=f"Evaluating {stage}"):
+            features, labels = features.to(device), labels.to(device)
             input_lengths, label_lengths = input_lengths.to(device), label_lengths.to(device)
 
             try:
@@ -142,29 +141,25 @@ def evaluate(model, loader, index2phoneme, phoneme2index, device, logger, stage=
 
                     pred_seq = [index2phoneme[idx] for idx in pred_ids if idx in index2phoneme]
                     label_seq = [index2phoneme[idx] for idx in target_ids if idx in index2phoneme]
-                    actual_seq = [index2phoneme[idx.item()] for idx in phones_actual[i][:input_lengths[i]] if idx.item() in index2phoneme]
 
                     per_label = calculate_per(pred_seq, label_seq)
-                    per_actual = calculate_per(pred_seq, actual_seq)
 
                     total_per_label += per_label
-                    total_per_actual += per_actual
                     total_samples += 1
 
                     all_preds.extend(pred_ids)
                     all_labels.extend(target_ids)
 
-                    logger.debug(f"Sample {i} | Pred: {''.join(pred_seq)} | Label: {''.join(label_seq)} | Actual: {''.join(actual_seq)} | PER(label): {per_label:.2%}, PER(actual): {per_actual:.2%}")
+                    logger.debug(f"Sample {i} | Pred: {''.join(pred_seq)} | Label: {''.join(label_seq)} | PER(label): {per_label:.2%}")
 
                 except Exception as e:
                     logger.error(f"[EVAL DECODE ERROR] Sample {i} | Error: {e}")
                     continue
                 
     avg_per_label = total_per_label / total_samples if total_samples > 0 else 0
-    avg_per_actual = total_per_actual / total_samples if total_samples > 0 else 0
-    logger.info(f"{stage} PER(label): {avg_per_label:.2%}, PER(actual): {avg_per_actual:.2%}")
+    logger.info(f"{stage} PER(label): {avg_per_label:.2%}")
 
-    return avg_per_label, avg_per_actual
+    return avg_per_label
 
 def load_dataset_from_s3(s3_path):
     bucket = s3_path.split('/')[2]
