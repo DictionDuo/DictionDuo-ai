@@ -12,9 +12,6 @@ from tqdm import tqdm
 import Levenshtein
 import json
 import boto3
-from sklearn.metrics import confusion_matrix
-import seaborn as sns
-import matplotlib.pyplot as plt
 
 def download_from_s3(bucket_name, s3_key, local_path):
     s3 = boto3.client('s3')
@@ -166,16 +163,6 @@ def evaluate(model, loader, index2phoneme, phoneme2index, device, logger, stage=
     avg_per_label = total_per_label / total_samples if total_samples > 0 else 0
     avg_per_actual = total_per_actual / total_samples if total_samples > 0 else 0
     logger.info(f"{stage} PER(label): {avg_per_label:.2%}, PER(actual): {avg_per_actual:.2%}")
-
-    cm = confusion_matrix(all_labels, all_preds, labels=sorted(index2phoneme.keys()))
-    plt.figure(figsize=(12, 10))
-    sns.heatmap(cm, annot=False, xticklabels=index2phoneme.values(), yticklabels=index2phoneme.values(), cmap='Blues')
-    plt.xlabel('Predicted')
-    plt.ylabel('True')
-    plt.title(f'Confusion Matrix ({stage})')
-    plt.tight_layout()
-    plt.savefig(f"confusion_matrix_{stage.lower()}.png")
-    logger.info(f"Confusion matrix saved to confusion_matrix_{stage.lower()}.png")
 
     return avg_per_label, avg_per_actual
 
