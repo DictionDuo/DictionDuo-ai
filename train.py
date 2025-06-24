@@ -15,7 +15,6 @@ import boto3
 from sklearn.metrics import confusion_matrix
 import seaborn as sns
 import matplotlib.pyplot as plt
-import requests
 
 def download_from_s3(bucket_name, s3_key, local_path):
     s3 = boto3.client('s3')
@@ -97,6 +96,15 @@ def greedy_ctc_decode(pred_tensor, input_len, blank=0):
         prev = curr
     return decoded
 
+def fetch_json_from_s3(bucket, key):
+    s3 = boto3.client('s3')
+    try:
+        response = s3.get_object(Bucket=bucket, Key=key)
+        content = response['Body'].read().decode('utf-8')
+        return json.loads(content)
+    except Exception as e:
+        return None
+
 def evaluate(model, loader, index2phoneme, phoneme2index, device, logger, stage="Validation"):
     model.eval()
     total_per_label = 0.0
@@ -106,6 +114,8 @@ def evaluate(model, loader, index2phoneme, phoneme2index, device, logger, stage=
     all_labels = []
 
     korean = Korean()
+    bucket_name = "dd-dataset-bucket"
+    json_prefix = "json"
 
     with torch.no_grad():
         for features, labels, phones_actual, errors, input_lengths, label_lengths, metas in tqdm(loader, desc=f"Evaluating {stage}"):
@@ -122,14 +132,12 @@ def evaluate(model, loader, index2phoneme, phoneme2index, device, logger, stage=
             for i in range(features.size(0)):
                 try:
                     json_filename = os.path.basename(metas[i])
-                    s3_url = f"https://dictionduo-bucket.s3.ap-northeast-2.amazonaws.com/json/{json_filename}"
-
-                    response = requests.get(s3_url)
-                    if response.status_code != 200:
-                        logger.error(f"[EVAL DECODE ERROR] S3 JSON fetch failed: {s3_url}")
+                    s3_key = f"{json_prefix}/{json_filename}"
+                    meta_json = fetch_json_from_s3(bucket_name, s3_key)
+                    if meta_json is None:
+                        logger.error(f"[EVAL DECODE ERROR] S3 JSON fetch failed: {s3_key}")
                         continue
 
-                    meta_json = response.json()
                     prompt_text = meta_json["RecordingMetadata"]["prompt"]
                     target_ids = korean.text_to_phoneme_sequence(prompt_text, phoneme2index)
 
@@ -152,7 +160,7 @@ def evaluate(model, loader, index2phoneme, phoneme2index, device, logger, stage=
                     logger.debug(f"Sample {i} | Pred: {''.join(pred_seq)} | Label: {''.join(label_seq)} | Actual: {''.join(actual_seq)} | PER(label): {per_label:.2%}, PER(actual): {per_actual:.2%}")
 
                 except Exception as e:
-                    logger.error(f"[EVAL DECODE ERROR] Sample {i} | JSON: {json_filename} | Error: {e}")
+                    logger.error(f"[EVAL DECODE ERROR] Sample {i} | Error: {e}")
                     continue
                 
     avg_per_label = total_per_label / total_samples if total_samples > 0 else 0
