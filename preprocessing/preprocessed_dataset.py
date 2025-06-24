@@ -32,7 +32,7 @@ def build_tensor_dataset(split_list, split_name, output_dir):
     error_list = []
     lengths = []
     label_lengths = []
-    meta_list = []
+    meta_dict_list = []
 
     with open("utils/error_class_map.json", encoding="utf-8") as f:
         error_map = json.load(f)
@@ -96,7 +96,7 @@ def build_tensor_dataset(split_list, split_name, output_dir):
             error_list.append(torch.tensor(error_label))
             lengths.append(input_length)
             label_lengths.append(label_length)
-            meta_list.append(meta)
+            meta_dict_list.append({"json": meta["json"]})
 
         except Exception as e:
             print(f"[Error] {meta['wav']} - {e}")
@@ -110,7 +110,7 @@ def build_tensor_dataset(split_list, split_name, output_dir):
             "errors": torch.stack(error_list),
             "input_lengths": lengths,
             "label_lengths": label_lengths,
-            "metas": meta_list
+            "metas": meta_dict_list
         }, os.path.join(output_dir, f"{split_name}_dataset.pt"))
         print(f"[Saved] ({len(mel_list)} samples)")
     
