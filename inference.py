@@ -6,7 +6,6 @@ import torchaudio
 
 from conformer.model import Conformer
 from preprocessing.frame_utils import pad_or_truncate_feature
-from utils.phoneme_utils import phoneme2index, index2phoneme
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -23,6 +22,13 @@ MAX_FRAMES = 512
 SAMPLING_RATE = 16000
 
 def model_fn(model_dir):
+    # Load phoneme2index.json
+    phoneme_path = os.path.join(model_dir, "phoneme2index.json")
+    with open(phoneme_path, "r", encoding="utf-8") as f:
+        phoneme2index = json.load(f)
+    index2phoneme = {v: k for k, v in phoneme2index.items()}
+
+    # Load model
     model_path = os.path.join(model_dir, "model.pt")
 
     model = Conformer(
@@ -33,6 +39,10 @@ def model_fn(model_dir):
     )
     model.load_state_dict(torch.load(model_path, map_location="cpu"))
     model.eval()
+
+    # Attach phoneme dicts to model
+    model.phoneme2index = phoneme2index
+    model.index2phoneme = index2phoneme
 
     return model
 
@@ -81,7 +91,7 @@ def predict_fn(input_data, model):
             decoded.append(idx)
         prev = idx
 
-    phoneme_seq = [index2phoneme.get(idx, "_") for idx in decoded]
+    phoneme_seq = [model.index2phoneme.get(idx, "_") for idx in decoded]
     return phoneme_seq
 
 def output_fn(prediction, accept):
