@@ -3,6 +3,7 @@ import io
 import json
 import torch
 import torchaudio
+import hgtk
 
 from conformer.model import Conformer
 from preprocessing.frame_utils import pad_or_truncate_feature
@@ -18,7 +19,7 @@ mel_transform = torchaudio.transforms.MelSpectrogram(
 
 db_transform = torchaudio.transforms.AmplitudeToDB(top_db=80).to(device)
 
-MAX_FRAMES = 512
+WIN_SIZE = 256
 SAMPLING_RATE = 16000
 
 def model_fn(model_dir):
@@ -69,30 +70,60 @@ def extract_features_from_waveform(waveform: torch.Tensor, sr: int = 16000) -> t
 
     return mel_db
 
+def phonemes_to_text(phoneme_seq):
+    result = ""
+    syllable = []
+
+    for p in phoneme_seq:
+        syllable.append(p)
+        if len(syllable) == 3 or (len(syllable) == 2 and syllable[1] not in [None, ""]):
+            try:
+                result += hgtk.letter.compose(*syllable)
+            except:
+                result += ''.join(syllable)
+            syllable = []
+
+    if syllable:
+        result += ''.join(syllable)
+    return result
+
 def predict_fn(input_data, model):
     waveform, sr = input_data
     mel = extract_features_from_waveform(waveform, sr)
     if mel is None:
         raise ValueError("Invalid mel features from input audio.")
 
-    mel_np = pad_or_truncate_feature(mel.numpy(), MAX_FRAMES, fill_value=0)
-    mel_tensor = torch.tensor(mel_np, dtype=torch.float32).unsqueeze(0)  # [1, T, 80]
-    input_length = torch.tensor([mel_tensor.size(1)])
+    if mel.size(0) < WIN_SIZE:
+        mel_np = pad_or_truncate_feature(mel.numpy(), WIN_SIZE, fill_value=0)
+        mel_tensor = torch.tensor(mel_np, dtype=torch.float32).unsqueeze(0)  # [1, T, 80]
+        input_length = torch.tensor([mel_tensor.size(1)])
 
-    with torch.no_grad():
-        outputs, output_lengths = model(mel_tensor, input_length)
-        pred_ids = outputs.argmax(dim=-1).squeeze(0).tolist()
+        with torch.no_grad():
+            outputs, output_lengths = model(mel_tensor, input_length)
+            pred_ids = outputs.argmax(dim=-1).squeeze(0).tolist()
 
-    # CTC Greedy decoding
-    decoded = []
-    prev = None
-    for idx in pred_ids:
-        if idx != 0 and idx != prev:
-            decoded.append(idx)
-        prev = idx
+    else:
+        pred_ids = []
+        for start in range(0, len(mel) - WIN_SIZE + 1, WIN_SIZE):
+            mel_chunk = mel[start:start + WIN_SIZE].numpy()
+            mel_tensor = torch.tensor(mel_chunk, dtype=torch.float32).unsqueeze(0)
+            input_length = torch.tensor([mel_tensor.size(1)])
 
-    phoneme_seq = [model.index2phoneme.get(idx, "_") for idx in decoded]
-    return phoneme_seq
+            with torch.no_grad():
+                outputs, output_lengths = model(mel_tensor, input_length)
+                chunk_ids = outputs.argmax(dim=-1).squeeze(0).tolist()            
+
+            # CTC Greedy decoding
+            prev = None
+            for idx in chunk_ids:
+                if idx != 0 and idx != prev:
+                    pred_ids.append(idx)
+                prev = idx
+
+    phoneme_seq = [model.index2phoneme.get(idx, "_") for idx in pred_ids]
+    reconstructed_text = phonemes_to_text(phoneme_seq)
+
+    return {"reconstructed_text": reconstructed_text}
 
 def output_fn(prediction, accept):
-    return json.dumps({"phoneme_seq": prediction}, ensure_ascii=False)
+    return json.dumps(prediction, ensure_ascii=False)
