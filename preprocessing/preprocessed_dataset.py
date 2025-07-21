@@ -112,8 +112,8 @@ def build_tensor_dataset(split_list, split_name, output_dir):
         print(f"[Saved] {split_name}_skipped.json → {len(skipped)} skipped samples")
 
 def main():
-    wav_dir = "/home/ubuntu/data"
-    json_dir = "/home/ubuntu/data"
+    wav_dir = "/home/ubuntu/data/wav"
+    json_dir = "/home/ubuntu/data/json"
     output_dir = "/home/ubuntu/preprocessed"
     os.makedirs(output_dir, exist_ok=True)
 
