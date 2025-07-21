@@ -110,8 +110,8 @@ def evaluate(model, loader, index2phoneme, phoneme2index, device, logger, stage=
     all_labels = []
 
     korean = Korean()
-    bucket_name = "dd-dataset-bucket"
-    json_prefix = "json"
+    bucket_name = "dictionduo-ai"
+    json_prefix = "data/json"
 
     with torch.no_grad():
         for features, labels, input_lengths, label_lengths, metas in tqdm(loader, desc=f"Evaluating {stage}"):
