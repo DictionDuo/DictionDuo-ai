@@ -12,7 +12,8 @@ from preprocessing.frame_utils import pad_or_truncate_feature
 from preprocessing.label_utils import create_phoneme_label, create_error_label
 from utils.phoneme_utils import Korean, phoneme2index, convert_prompt_to_phoneme_sequence
 
-MAX_FRAMES = 512  # 고정 mel 길이 (frame 단위)
+WIN_SIZE = 256
+STRIDE = 128
 HOP_LENGTH = 160
 SAMPLING_RATE = 16000
 
@@ -24,12 +25,16 @@ def is_valid_wav(wav_path):
         print(f"[Invalid WAV] {wav_path} - {e}")
         return False
 
+def slice_with_overlap(arr, win_size=256, stride=128):
+    slices = []
+    for start in range(0, len(arr) - win_size + 1, stride):
+        slices.append(arr[start:start + win_size])
+    return slices
+
 def build_tensor_dataset(split_list, split_name, output_dir):
     skipped = []
     mel_list = []
     phoneme_list = []
-    phones_actual_list = []
-    error_list = []
     lengths = []
     label_lengths = []
     meta_list = []
@@ -55,8 +60,6 @@ def build_tensor_dataset(split_list, split_name, output_dir):
                 continue
 
             mel_np = mel.cpu().numpy()
-            original_len = len(mel_np)
-            mel_padded = pad_or_truncate_feature(mel_np, MAX_FRAMES, fill_value=0)
 
             with open(meta["json"], encoding="utf-8") as f:
                 meta_json = json.load(f)
@@ -75,28 +78,19 @@ def build_tensor_dataset(split_list, split_name, output_dir):
                 skipped.append(meta)
                 continue
 
-            phoneme_padded = pad_or_truncate_feature(phoneme_indices, MAX_FRAMES, fill_value=0)
-            phoneme_tensor = torch.tensor(phoneme_padded)
+            mel_chunks = slice_with_overlap(mel_np, WIN_SIZE, STRIDE)
+            phoneme_chunks = slice_with_overlap(phoneme_indices, WIN_SIZE, STRIDE)
 
-            phones_actual = create_phoneme_label(phones, MAX_FRAMES, phoneme2index, SAMPLING_RATE, HOP_LENGTH)
-            errors = meta_json["RecordingMetadata"]["phonemic"].get("error_tags", [])
-            error_label = create_error_label(errors, MAX_FRAMES, error_map, SAMPLING_RATE, HOP_LENGTH)
+            for mel_c, pho_c in zip(mel_chunks, phoneme_chunks):
+                if len(pho_c) == 0:
+                    continue
 
-            input_length = min(original_len, MAX_FRAMES)
-            label_length = int((phoneme_tensor != 0).sum().item())
-
-            if input_length == 0 or label_length == 0:
-                print(f"[SKIP] Zero length input/label: {meta['wav']}")
-                skipped.append(meta)
-                continue
-
-            mel_list.append(torch.tensor(mel_padded, dtype=torch.float32))
-            phoneme_list.append(phoneme_tensor)
-            phones_actual_list.append(torch.tensor(phones_actual))
-            error_list.append(torch.tensor(error_label))
-            lengths.append(input_length)
-            label_lengths.append(label_length)
-            meta_list.append(meta["json"])
+                mel_list.append(torch.tensor(mel_c, dtype=torch.float32))
+                phoneme_padded = pad_or_truncate_feature(pho_c, WIN_SIZE, fill_value=0)
+                phoneme_list.append(torch.tensor(phoneme_padded))
+                lengths.append(len(mel_c))
+                label_lengths.append(int(np.count_nonzero(pho_c)))
+                meta_list.append(meta["json"])
 
         except Exception as e:
             print(f"[Error] {meta['wav']} - {e}")
@@ -106,8 +100,6 @@ def build_tensor_dataset(split_list, split_name, output_dir):
         torch.save({
             "mels": torch.stack(mel_list),
             "phonemes": torch.stack(phoneme_list),
-            "phones_actual": torch.stack(phones_actual_list),
-            "errors": torch.stack(error_list),
             "input_lengths": lengths,
             "label_lengths": label_lengths,
             "metas": meta_list
