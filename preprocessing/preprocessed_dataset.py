@@ -26,10 +26,9 @@ def is_valid_wav(wav_path):
         return False
 
 def slice_with_overlap(arr, win_size=256, stride=128):
-    slices = []
-    for start in range(0, len(arr) - win_size + 1, stride):
-        slices.append(arr[start:start + win_size])
-    return slices
+    if len(arr) < win_size:
+        return []
+    return [arr[start:start + win_size] for start in range(0, len(arr) - win_size + 1, stride)]
 
 def build_tensor_dataset(split_list, split_name, output_dir):
     skipped = []
@@ -71,20 +70,24 @@ def build_tensor_dataset(split_list, split_name, output_dir):
                 skipped.append(meta)
                 continue
 
-            prompt = meta_json["RecordingMetadata"].get("prompt", "")
-            phoneme_indices = convert_prompt_to_phoneme_sequence(prompt, phoneme2index, korean)
-            
-            if not phoneme_indices:
-                skipped.append(meta)
-                continue
+            # 프레임 수 기준으로 라벨 생성
+            phoneme_indices = create_phoneme_label(
+                phones,
+                max_frames=mel_np.shape[0],
+                phoneme_dict=phoneme2index,
+                sr=SAMPLING_RATE,
+                hop_length=HOP_LENGTH
+            )
 
             mel_chunks = slice_with_overlap(mel_np, WIN_SIZE, STRIDE)
             phoneme_chunks = slice_with_overlap(phoneme_indices, WIN_SIZE, STRIDE)
 
-            for mel_c, pho_c in zip(mel_chunks, phoneme_chunks):
-                if len(pho_c) == 0:
-                    continue
+            if len(mel_chunks) != len(phoneme_chunks):
+                print(f"[SKIP] Chunk length mismatch: mel={len(mel_chunks)}, phoneme={len(phoneme_chunks)}")
+                skipped.append(meta)
+                continue
 
+            for mel_c, pho_c in zip(mel_chunks, phoneme_chunks):
                 mel_list.append(torch.tensor(mel_c, dtype=torch.float32))
                 phoneme_padded = pad_or_truncate_feature(pho_c, WIN_SIZE, fill_value=0)
                 phoneme_list.append(torch.tensor(phoneme_padded))
