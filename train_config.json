@@ -5,12 +5,12 @@
     "seed": 42,
     "model_dir": "/opt/ml/model",
     "download": true,
-    "bucket_name": "dictionduo-bucket",
+    "bucket_name": "dictionduo-ai",
     "upload_model": true,
-    "upload_bucket": "dd-conformer-bucket",
+    "upload_bucket": "dictionduo-ai",
     "upload_path": "model/",
     "eval_interval": 5,
-    "train_dataset_path": "s3://dictionduo-bucket/preprocessed/train_dataset.pt",
-    "val_dataset_path": "s3://dictionduo-bucket/preprocessed/val_dataset.pt",
-    "test_dataset_path": "s3://dictionduo-bucket/preprocessed/test_dataset.pt"
+    "train_dataset_path": "s3://dictionduo-ai/preprocessed/train_dataset.pt",
+    "val_dataset_path": "s3://dictionduo-ai/preprocessed/val_dataset.pt",
+    "test_dataset_path": "s3://dictionduo-ai/preprocessed/test_dataset.pt"
   }
