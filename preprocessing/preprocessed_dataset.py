@@ -9,11 +9,11 @@ from preprocessing.feature_extraction import extract_features
 from preprocessing.build_dataset import build_metadata_list
 from preprocessing.split_dataset import split_metadata
 from preprocessing.frame_utils import pad_or_truncate_feature
-from preprocessing.label_utils import create_phoneme_label, create_error_label
-from utils.phoneme_utils import Korean, phoneme2index, convert_prompt_to_phoneme_sequence
+from preprocessing.label_utils import create_phoneme_label
+from utils.phoneme_utils import Korean, phoneme2index
 
-WIN_SIZE = 256
-STRIDE = 128
+WIN_SIZE = 80
+STRIDE = 40
 HOP_LENGTH = 160
 SAMPLING_RATE = 16000
 
@@ -25,10 +25,26 @@ def is_valid_wav(wav_path):
         print(f"[Invalid WAV] {wav_path} - {e}")
         return False
 
-def slice_with_overlap(arr, win_size=256, stride=128):
-    if len(arr) < win_size:
-        return []
-    return [arr[start:start + win_size] for start in range(0, len(arr) - win_size + 1, stride)]
+def slice_with_overlap(arr, win_size=80, stride=40):
+    slices = []
+    arr_len = len(arr)
+
+    if arr_len < win_size:
+        padded = pad_or_truncate_feature(arr, win_size, fill_value=0)
+        return [padded]
+    
+    for start in range(0, arr_len - win_size + 1, stride):
+        slices.append(arr[start:start + win_size])
+
+    # 마지막 남은 프레임 포함
+    if (arr_len - win_size) % stride != 0:
+        last_start = arr_len - win_size
+        last_chunk = arr[last_start:]
+        if len(last_chunk) < win_size:
+            last_chunk = pad_or_truncate_feature(last_chunk, win_size, fill_value=0)
+        slices.append(last_chunk)
+
+    return slices
 
 def build_tensor_dataset(split_list, split_name, output_dir):
     skipped = []
