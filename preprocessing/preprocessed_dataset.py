@@ -10,7 +10,7 @@ from preprocessing.build_dataset import build_metadata_list
 from preprocessing.split_dataset import split_metadata
 from preprocessing.frame_utils import pad_or_truncate_feature
 from preprocessing.label_utils import create_phoneme_label
-from utils.phoneme_utils import Korean, phoneme2index
+from utils.phoneme_utils import Korean
 
 WIN_SIZE = 80
 STRIDE = 40
@@ -56,6 +56,10 @@ def build_tensor_dataset(split_list, split_name, output_dir):
 
     with open("utils/error_class_map.json", encoding="utf-8") as f:
         error_map = json.load(f)
+
+    with open("utils/phoneme2index.json", encoding="utf-8") as f:
+        phoneme2index = json.load(f)
+        phoneme2index = {k: int(v) for k, v in phoneme2index.items()}
 
     korean = Korean()
 
