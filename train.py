@@ -5,7 +5,7 @@ from datetime import datetime
 from torch.utils.data import DataLoader
 from conformer.model import Conformer
 from dataset.phoneme_tensor_dataset import PhonemeTensorDataset
-from utils.phoneme_utils import Korean, phoneme2index
+from utils.phoneme_utils import Korean
 from utils.logger import setup_logger
 from utils.config_loader import convert_config_to_namespace
 from tqdm import tqdm
@@ -106,8 +106,6 @@ def evaluate(model, loader, index2phoneme, phoneme2index, device, logger, stage=
     model.eval()
     total_per_label = 0.0
     total_samples = 0
-    all_preds = []
-    all_labels = []
 
     korean = Korean()
     bucket_name = "dictionduo-ai"
@@ -147,9 +145,6 @@ def evaluate(model, loader, index2phoneme, phoneme2index, device, logger, stage=
                     total_per_label += per_label
                     total_samples += 1
 
-                    all_preds.extend(pred_ids)
-                    all_labels.extend(target_ids)
-
                     logger.debug(f"Sample {i} | Pred: {''.join(pred_seq)} | Label: {''.join(label_seq)} | PER(label): {per_label:.2%}")
 
                 except Exception as e:
@@ -175,6 +170,12 @@ def main():
     logger = setup_logger(os.path.join(args.model_dir, 'train.log'))
     logger.info("===== Training Started =====")
     logger.info(f"Epochs: {args.epochs}, LR: {args.learning_rate}, Batch: {args.batch_size}, Seed: {args.seed}")
+
+    with open("utils/phoneme2index.json", encoding="utf-8") as f:
+        phoneme2index = json.load(f)
+
+    phoneme2index = {k: int(v) for k, v in phoneme2index.items()}
+    index2phoneme = {v: k for k, v in phoneme2index.items()}
 
     os.makedirs("preprocessed", exist_ok=True)
     train_data = load_dataset_from_s3(args.train_dataset_path)
@@ -205,8 +206,6 @@ def main():
 
     criterion = nn.CTCLoss(blank=0, zero_infinity=True).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
-
-    index2phoneme = {v: k for k, v in phoneme2index.items()}
 
     for epoch in range(args.epochs):
         logger.info(f"--- Epoch {epoch+1}/{args.epochs} ---")
