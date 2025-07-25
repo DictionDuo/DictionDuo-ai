@@ -65,14 +65,3 @@ def convert_prompt_to_phoneme_sequence(prompt: str, phoneme2index: dict, korean:
         return []
 
     return phoneme_seq
-
-# Generate phoneme2index dictionary
-phoneme_set = set(Korean.phoneme_onset_list + Korean.phoneme_nucleus_list + Korean.phoneme_coda_list)
-phoneme_set.discard(' ')
-phoneme_list = sorted(phoneme_set)
-phoneme2index = {p: i + 1 for i, p in enumerate(phoneme_list)}
-phoneme2index['<blank>'] = 0
-
-# Save dictionary to JSON
-with open('phoneme2index.json', 'w', encoding='utf-8') as f:
-    json.dump(phoneme2index, f, ensure_ascii=False, indent=4)
