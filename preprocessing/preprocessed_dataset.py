@@ -25,27 +25,36 @@ def is_valid_wav(wav_path):
         print(f"[Invalid WAV] {wav_path} - {e}")
         return False
 
-def slice_with_overlap(arr, win_size=80, stride=40):
-    arr_len = len(arr)
+def slice_with_overlap_and_label_filter(mel, labels, win_size=80, stride=40):
+    mel_slices, label_slices = [], []
+    arr_len = len(mel)
 
     if arr_len <= win_size:
-        return [pad_or_truncate_feature(arr, win_size, fill_value=0)]
-
-    slices = []
-    last_start = -1
+        if np.count_nonzero(labels) > 0:
+            mel_slices.append(pad_or_truncate_feature(mel, win_size, fill_value=0))
+            label_slices.append(pad_or_truncate_feature(labels, win_size, fill_value=0))
+        return mel_slices, label_slices
     
     for start in range(0, arr_len - win_size + 1, stride):
-        slices.append(arr[start:start + win_size])
-        last_start = start
+        mel_chunk = mel[start:start + win_size]
+        label_chunk = labels[start:start + win_size]
+        if np.count_nonzero(label_chunk) > 0:
+            mel_slices.append(mel_chunk)
+            label_slices.append(label_chunk)
 
     # 마지막 남은 프레임 포함
+    last_start = arr_len - win_size
     if last_start + stride < arr_len:
-        last_chunk = arr[-win_size:]
-        if len(last_chunk) < win_size:
-            last_chunk = pad_or_truncate_feature(last_chunk, win_size, fill_value=0)
-        slices.append(last_chunk)
+        mel_chunk = mel[-win_size:]
+        label_chunk = labels[-win_size:]
+        if len(mel_chunk) < win_size:
+            mel_chunk = pad_or_truncate_feature(mel_chunk, win_size, fill_value=0)
+            label_chunk = pad_or_truncate_feature(label_chunk, win_size, fill_value=0)
+        if np.count_nonzero(label_chunk) > 0:
+            mel_slices.append(mel_chunk)
+            label_slices.append(label_chunk)
 
-    return slices
+    return mel_slices, label_slices
 
 def build_tensor_dataset(split_list, split_name, output_dir):
     skipped = []
@@ -100,13 +109,9 @@ def build_tensor_dataset(split_list, split_name, output_dir):
                 hop_length=HOP_LENGTH
             )
 
-            mel_chunks = slice_with_overlap(mel_np, WIN_SIZE, STRIDE)
-            phoneme_chunks = slice_with_overlap(phoneme_indices, WIN_SIZE, STRIDE)
-
-            if len(mel_chunks) != len(phoneme_chunks):
-                print(f"[SKIP] Chunk length mismatch: mel={len(mel_chunks)}, phoneme={len(phoneme_chunks)}")
-                skipped.append(meta)
-                continue
+            mel_chunks, phoneme_chunks = slice_with_overlap_and_label_filter(
+                mel_np, phoneme_indices, WIN_SIZE, STRIDE
+            )
 
             for mel_c, pho_c in zip(mel_chunks, phoneme_chunks):
                 mel_list.append(torch.tensor(mel_c, dtype=torch.float32))
