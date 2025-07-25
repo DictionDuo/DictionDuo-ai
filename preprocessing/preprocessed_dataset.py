@@ -26,20 +26,21 @@ def is_valid_wav(wav_path):
         return False
 
 def slice_with_overlap(arr, win_size=80, stride=40):
-    slices = []
     arr_len = len(arr)
 
-    if arr_len < win_size:
-        padded = pad_or_truncate_feature(arr, win_size, fill_value=0)
-        return [padded]
+    if arr_len <= win_size:
+        return [pad_or_truncate_feature(arr, win_size, fill_value=0)]
+
+    slices = []
+    last_start = -1
     
     for start in range(0, arr_len - win_size + 1, stride):
         slices.append(arr[start:start + win_size])
+        last_start = start
 
     # 마지막 남은 프레임 포함
-    if (arr_len - win_size) % stride != 0:
-        last_start = arr_len - win_size
-        last_chunk = arr[last_start:]
+    if last_start + stride < arr_len:
+        last_chunk = arr[-win_size:]
         if len(last_chunk) < win_size:
             last_chunk = pad_or_truncate_feature(last_chunk, win_size, fill_value=0)
         slices.append(last_chunk)
