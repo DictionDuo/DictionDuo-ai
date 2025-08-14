@@ -5,13 +5,14 @@ from datetime import datetime
 from torch.utils.data import DataLoader
 from conformer.model import Conformer
 from dataset.phoneme_tensor_dataset import PhonemeTensorDataset
-from utils.phoneme_utils import Korean
 from utils.logger import setup_logger
 from utils.config_loader import convert_config_to_namespace
 from tqdm import tqdm
 import Levenshtein
 import json
 import boto3
+
+SPECIALS = {"<blank>", "<pad>", "<s>", "</s>", "<unk>", "_"}
 
 def download_from_s3(bucket_name, s3_key, local_path):
     s3 = boto3.client('s3')
@@ -27,6 +28,23 @@ def calculate_per(pred_seq, label_seq):
     label_str = ' '.join(label_seq)
     distance = Levenshtein.distance(pred_str, label_str)
     return distance / max(len(label_seq), 1)
+
+def collapse_repeats(seq):
+    """CTC-style repeat collapse: a a a -> a"""
+    out, prev = [], None
+    for s in seq:
+        if s != prev:
+            out.append(s)
+        prev = s
+    return out
+
+def idx_to_phonemes(idx_seq, index2phoneme):
+    """index 시퀀스 -> 음소 문자열 리스트"""
+    return [index2phoneme.get(int(i), "<unk>") for i in idx_seq]
+
+def clean_phonemes(ph_seq):
+    """스페셜/빈 토큰 제거"""
+    return [p for p in ph_seq if p and (p not in SPECIALS) and p.strip() != ""]
 
 def train_one_epoch(model, loader, criterion, optimizer, device, logger):
     model.train()
@@ -86,30 +104,17 @@ def train_one_epoch(model, loader, criterion, optimizer, device, logger):
 def greedy_ctc_decode(pred_tensor, input_len, blank=0):
     decoded = []
     prev = None
-    for i in range(input_len):
-        curr = pred_tensor[i].item()
+    for t in range(int(input_len)):
+        curr = int(pred_tensor[t].item())
         if curr != blank and curr != prev:
             decoded.append(curr)
         prev = curr
     return decoded
 
-def fetch_json_from_s3(bucket, key):
-    s3 = boto3.client('s3')
-    try:
-        response = s3.get_object(Bucket=bucket, Key=key)
-        content = response['Body'].read().decode('utf-8')
-        return json.loads(content)
-    except Exception as e:
-        return None
-
-def evaluate(model, loader, index2phoneme, phoneme2index, device, logger, stage="Validation"):
+def evaluate(model, loader, index2phoneme, device, logger, stage="Validation", blank_index=0, log_debug_n=2):
     model.eval()
     total_per_label = 0.0
     total_samples = 0
-
-    korean = Korean()
-    bucket_name = "dictionduo-ai"
-    json_prefix = "data/json"
 
     with torch.no_grad():
         for features, labels, input_lengths, label_lengths, metas in tqdm(loader, desc=f"Evaluating {stage}"):
@@ -123,38 +128,44 @@ def evaluate(model, loader, index2phoneme, phoneme2index, device, logger, stage=
                 logger.error(f"[EVAL FORWARD ERROR] {e}")
                 continue
 
-            for i in range(features.size(0)):
+            B = features.size(0)
+            for i in range(B):
                 try:
-                    json_filename = os.path.basename(metas[i])
-                    s3_key = f"{json_prefix}/{json_filename}"
-                    meta_json = fetch_json_from_s3(bucket_name, s3_key)
-                    if meta_json is None:
-                        logger.error(f"[EVAL DECODE ERROR] S3 JSON fetch failed: {s3_key}")
-                        continue
+                    T_out = int(output_lengths[i].item())
+                    pred_ids_raw = preds[i]  # [T]
+                    pred_ids = greedy_ctc_decode(pred_ids_raw, T_out, blank=blank_index)
+                    pred_ph = idx_to_phonemes(pred_ids, index2phoneme)
+                    pred_ph = clean_phonemes(collapse_repeats(pred_ph))
 
-                    prompt_text = meta_json["RecordingMetadata"]["prompt"]
-                    target_ids = korean.text_to_phoneme_sequence(prompt_text, phoneme2index)
+                    ref_frame = labels[i].detach().cpu().tolist()
+                    ref_noblank = [int(r) for r in ref_frame if int(r) != blank_index]
+                    ref_seq_ids = collapse_repeats(ref_noblank)
+                    ref_ph = idx_to_phonemes(ref_seq_ids, index2phoneme)
+                    ref_ph = clean_phonemes(ref_ph)
 
-                    pred_ids = greedy_ctc_decode(preds[i], output_lengths[i], blank=0)
-
-                    pred_seq = [index2phoneme[idx] for idx in pred_ids if idx in index2phoneme]
-                    label_seq = [index2phoneme[idx] for idx in target_ids if idx in index2phoneme]
-
-                    per_label = calculate_per(pred_seq, label_seq)
-
-                    total_per_label += per_label
+                    per = calculate_per(pred_ph, ref_ph)
+                    total_per += per
                     total_samples += 1
 
-                    logger.debug(f"Sample {i} | Pred: {''.join(pred_seq)} | Label: {''.join(label_seq)} | PER(label): {per_label:.2%}")
+                    # 디버그 로그 (초기 n개)
+                    if total_samples <= log_debug_n:
+                        nonzero_cnt = int((labels[i] != blank_index).sum().item())
+                        L_lab = int(label_lengths[i].item())
+                        logger.info(
+                            "[DBG] "
+                            f"out_T={T_out} ref_nonzero={nonzero_cnt} label_lengths={L_lab} "
+                            f"ref_seq_len={len(ref_seq_ids)} pred_seq_len={len(pred_ids)} "
+                            f"PER={per:.2%} | REF={' '.join(ref_ph[:40])} | PRED={' '.join(pred_ph[:40])}"
+                        )
 
                 except Exception as e:
                     logger.error(f"[EVAL DECODE ERROR] Sample {i} | Error: {e}")
                     continue
                 
-    avg_per_label = total_per_label / total_samples if total_samples > 0 else 0
-    logger.info(f"{stage} PER(label): {avg_per_label:.2%}")
+    avg_per = total_per / total_samples if total_samples > 0 else 0
+    logger.info(f"{stage} PER(label): {avg_per:.2%}")
 
-    return avg_per_label
+    return avg_per
 
 def load_dataset_from_s3(s3_path):
     bucket = s3_path.split('/')[2]
@@ -167,6 +178,7 @@ def load_dataset_from_s3(s3_path):
 def main():
     args = convert_config_to_namespace("train_config.json")
 
+    os.makedirs(args.model_dir, exist_ok=True)
     logger = setup_logger(os.path.join(args.model_dir, 'train.log'))
     logger.info("===== Training Started =====")
     logger.info(f"Epochs: {args.epochs}, LR: {args.learning_rate}, Batch: {args.batch_size}, Seed: {args.seed}")
@@ -209,12 +221,11 @@ def main():
 
     for epoch in range(args.epochs):
         logger.info(f"--- Epoch {epoch+1}/{args.epochs} ---")
-        avg_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, logger)
+        _ = train_one_epoch(model, train_loader, criterion, optimizer, device, logger)
 
         if (epoch + 1) % args.eval_interval == 0 or (epoch + 1) == args.epochs:
-            evaluate(model, val_loader, index2phoneme, phoneme2index, device, logger, stage="Validation")
+            evaluate(model, val_loader, index2phoneme, device, logger, stage="Validation", blank_index=0)
 
-    os.makedirs(args.model_dir, exist_ok=True)
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
     model_name = f"conformer_{now}.pt"
     model_path = os.path.join(args.model_dir, model_name)
@@ -226,7 +237,7 @@ def main():
         logger.info(f"Uploaded to s3://{args.upload_bucket}/{args.upload_path}")
 
     logger.info("===== Running Final Test Evaluation =====")
-    evaluate(model, test_loader, index2phoneme, phoneme2index, device, logger, stage="Test")
+    evaluate(model, test_loader, index2phoneme, device, logger, stage="Test", blank_index=0)
     logger.info("===== Training + Evaluation Completed =====")
 
 if __name__ == "__main__":
