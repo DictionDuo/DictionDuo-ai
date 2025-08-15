@@ -113,7 +113,7 @@ def greedy_ctc_decode(pred_tensor, input_len, blank=0):
 
 def evaluate(model, loader, index2phoneme, device, logger, stage="Validation", blank_index=0, log_debug_n=2):
     model.eval()
-    total_per_label = 0.0
+    total_per = 0.0
     total_samples = 0
 
     with torch.no_grad():
