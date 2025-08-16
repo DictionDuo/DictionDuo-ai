@@ -9,13 +9,19 @@ from preprocessing.feature_extraction import extract_features
 from preprocessing.build_dataset import build_metadata_list
 from preprocessing.split_dataset import split_metadata
 from preprocessing.frame_utils import pad_or_truncate_feature
-from preprocessing.label_utils import create_phoneme_label
 from utils.phoneme_utils import Korean
 
 WIN_SIZE = 80
 STRIDE = 40
 HOP_LENGTH = 160
 SAMPLING_RATE = 16000
+
+SUBSAMPLING = 4
+BLANK_IDX = 0
+MAX_LABEL_LEN = 32
+DROP_IF_EXCEED = True
+
+FRAME_SEC = HOP_LENGTH / SAMPLING_RATE  # 프레임당 시간(초)
 
 def is_valid_wav(wav_path):
     try:
@@ -25,36 +31,50 @@ def is_valid_wav(wav_path):
         print(f"[Invalid WAV] {wav_path} - {e}")
         return False
 
-def slice_with_overlap_and_label_filter(mel, labels, win_size=80, stride=40):
-    mel_slices, label_slices = [], []
-    arr_len = len(mel)
+def phones_to_seq_in_window(phones, f_start, f_end, phoneme2index, use_midpoint=True, max_len=MAX_LABEL_LEN):
+    t0 = f_start * FRAME_SEC
+    t1 = f_end * FRAME_SEC
 
-    if arr_len <= win_size:
-        if np.count_nonzero(labels) > 0:
-            mel_slices.append(pad_or_truncate_feature(mel, win_size, fill_value=0))
-            label_slices.append(pad_or_truncate_feature(labels, win_size, fill_value=0))
-        return mel_slices, label_slices
-    
-    for start in range(0, arr_len - win_size + 1, stride):
-        mel_chunk = mel[start:start + win_size]
-        label_chunk = labels[start:start + win_size]
-        if np.count_nonzero(label_chunk) > 0:
-            mel_slices.append(mel_chunk)
-            label_slices.append(label_chunk)
+    seq = []
+    for ph in phones:
+        st = float(ph["start"])
+        ed = float(ph["end"])
+        if use_midpoint:
+            mid = 0.5 * (st + ed)
+            include = (t0 <= mid < t1)
+        else:
+            # 겹침 기준을 쓰고 싶으면 이 조건 사용
+            include = not (ed <= t0 or st >= t1)
 
-    # 마지막 남은 프레임 포함
-    last_start = arr_len - win_size
-    if last_start + stride < arr_len:
-        mel_chunk = mel[-win_size:]
-        label_chunk = labels[-win_size:]
-        if len(mel_chunk) < win_size:
-            mel_chunk = pad_or_truncate_feature(mel_chunk, win_size, fill_value=0)
-            label_chunk = pad_or_truncate_feature(label_chunk, win_size, fill_value=0)
-        if np.count_nonzero(label_chunk) > 0:
-            mel_slices.append(mel_chunk)
-            label_slices.append(label_chunk)
+        if include:
+            idx = phoneme2index.get(str(ph["phone"]), BLANK_IDX)
+            seq.append(idx)
 
-    return mel_slices, label_slices
+    # 길이 컷 & 패딩
+    if len(seq) > max_len:
+        seq = seq[:max_len]
+    seq_len = len(seq)
+    if seq_len < max_len:
+        seq += [BLANK_IDX] * (max_len - seq_len)
+
+    return seq, seq_len
+
+def iter_windows(total_frames, win_size=WIN_SIZE, stride=STRIDE, include_tail=False):
+    """
+    전체 프레임 길이(total_frames)에 대해 (f_start, f_end) 윈도우 구간을 생성.
+    include_tail=True이면 마지막 남은 꼬리 구간도 패딩해서 하나 더 생성.
+    """
+    if total_frames <= win_size:
+        yield 0, min(win_size, total_frames)
+        return
+
+    last_full_start = total_frames - win_size
+    for f_start in range(0, last_full_start + 1, stride):
+        yield f_start, f_start + win_size
+
+    if include_tail and (last_full_start + stride < total_frames):
+        # 꼬리 구간: 끝쪽을 WIN_SIZE로 맞춰서 한 구간 더
+        yield total_frames - win_size, total_frames
 
 def build_tensor_dataset(split_list, split_name, output_dir):
     skipped = []
@@ -100,25 +120,37 @@ def build_tensor_dataset(split_list, split_name, output_dir):
                 skipped.append(meta)
                 continue
 
-            # 프레임 수 기준으로 라벨 생성
-            phoneme_indices = create_phoneme_label(
-                phones,
-                max_frames=mel_np.shape[0],
-                phoneme_dict=phoneme2index,
-                sr=SAMPLING_RATE,
-                hop_length=HOP_LENGTH
-            )
+            T = mel_np.shape[0]
+            if T <= 0:
+                print(f"[SKIP] Empty feature: {meta['wav']}")
+                skipped.append(meta)
+                continue
 
-            mel_chunks, phoneme_chunks = slice_with_overlap_and_label_filter(
-                mel_np, phoneme_indices, WIN_SIZE, STRIDE
-            )
+            for f_start, f_end in iter_windows(T, WIN_SIZE, STRIDE, include_tail=False):
+                # 멜 윈도우: 길이가 부족할 경우 패딩해 고정 길이로 맞춤
+                mel_chunk = mel_np[f_start:f_end]
+                if mel_chunk.shape[0] < WIN_SIZE:
+                    mel_chunk = pad_or_truncate_feature(mel_chunk, WIN_SIZE, fill_value=0)
 
-            for mel_c, pho_c in zip(mel_chunks, phoneme_chunks):
-                mel_list.append(torch.tensor(mel_c, dtype=torch.float32))
-                phoneme_padded = pad_or_truncate_feature(pho_c, WIN_SIZE, fill_value=0)
-                phoneme_list.append(torch.tensor(phoneme_padded))
-                lengths.append(len(mel_c))
-                label_lengths.append(int(np.count_nonzero(pho_c)))
+                # 라벨(음소 시퀀스) 생성
+                seq, seq_len = phones_to_seq_in_window(
+                    phones, f_start, min(f_end, T), phoneme2index,
+                    use_midpoint=True, max_len=MAX_LABEL_LEN
+                )
+
+                # 빈 라벨은 스킵 (학습 효율)
+                if seq_len == 0:
+                    continue
+
+                est_out_len = max(1, WIN_SIZE // SUBSAMPLING)
+                if DROP_IF_EXCEED and (seq_len > est_out_len):
+                    # 이 윈도우는 모델 출력 타임스텝이 부족 → 드랍
+                    continue
+
+                mel_list.append(torch.tensor(mel_chunk, dtype=torch.float32))
+                phoneme_list.append(torch.tensor(seq, dtype=torch.long))
+                lengths.append(WIN_SIZE)
+                label_lengths.append(int(seq_len))
                 meta_list.append(meta["json"])
 
         except Exception as e:
