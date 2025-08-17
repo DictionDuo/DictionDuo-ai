@@ -1,22 +1,23 @@
 import torch
 from torch.utils.data import Dataset
+from typing import Optional, List, Dict, Any
 
 class PhonemeTensorDataset(Dataset):
-    def __init__(self, data_dict, meta_list=None):
-        """
-        data_dict: .pt로부터 로드된 사전 (mels, phonemes, input_lengths, label_lengths, metas 포함)
-        meta_list: 각 샘플에 대응되는 JSON 경로 문자열 리스트
-        """
+    def __init__(self, data_dict: Dict[str, Any], meta_list: Optional[List[str]] = None):
+        for k in ["mels", "phonemes", "input_lengths", "label_lengths"]:
+            if k not in data_dict:
+                raise KeyError(f"Missing key in data_dict: {k}")
+            
         self.mels = data_dict["mels"]
-        self.phonemes = data_dict["phonemes"]            # 정답 (prompt 기반)
+        self.phonemes = data_dict["phonemes"].long()
         self.input_lengths = data_dict["input_lengths"]
         self.label_lengths = data_dict["label_lengths"]
-        self.metas = meta_list if meta_list is not None else [None] * len(self.mels)
+        self.metas = meta_list if meta_list is not None else data_dict.get("metas", [None] * len(self.mels))
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.mels)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int):
         return (
             self.mels[idx],
             self.phonemes[idx],
