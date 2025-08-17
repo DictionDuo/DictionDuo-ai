@@ -1,4 +1,5 @@
 import os
+import json
 import torch
 import torch.nn as nn
 from datetime import datetime
@@ -9,10 +10,17 @@ from utils.logger import setup_logger
 from utils.config_loader import convert_config_to_namespace
 from tqdm import tqdm
 import Levenshtein
-import json
 import boto3
+import random
+import numpy as np
 
 SPECIALS = {"<blank>", "<pad>", "<s>", "</s>", "<unk>", "_"}
+
+def set_seed(seed: int):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
 def download_from_s3(bucket_name, s3_key, local_path):
     s3 = boto3.client('s3')
@@ -46,7 +54,7 @@ def clean_phonemes(ph_seq):
     """스페셜/빈 토큰 제거"""
     return [p for p in ph_seq if p and (p not in SPECIALS) and p.strip() != ""]
 
-def train_one_epoch(model, loader, criterion, optimizer, device, logger):
+def train_one_epoch(model, loader, criterion, optimizer, device, logger, blank_index: int):
     model.train()
     total_loss = 0.0
     valid_batches = 0
@@ -66,25 +74,21 @@ def train_one_epoch(model, loader, criterion, optimizer, device, logger):
             logger.error("[LENGTH ERROR] Non-positive input/label lengths")
             continue
 
-        # [2] 값이 너무 큰 경우 체크
-        if (features.abs() > 1e4).any():
-            logger.warning("[MEL WARNING] Extremely large values in features")
-
-        # [3] Forward
+        # [2] Forward
         try:
             outputs, output_lengths = model(features, input_lengths)
         except Exception as e:
             logger.error(f"[FORWARD ERROR] {e}")
             continue
 
-        # [4] Loss 계산
+        # [3] Loss 계산
         try:
             loss = criterion(outputs.transpose(0, 1).contiguous(), labels, output_lengths, label_lengths)
         except Exception as e:
             logger.error(f"[LOSS COMPUTE ERROR] {e}")
             continue
 
-        # [5] NaN or inf loss 체크
+        # [4] NaN or inf loss 체크
         if torch.isnan(loss) or torch.isinf(loss):
             logger.error("[LOSS ERROR] NaN or Inf in loss!")
             continue
@@ -137,7 +141,8 @@ def evaluate(model, loader, index2phoneme, device, logger, stage="Validation", b
                     pred_ph = idx_to_phonemes(pred_ids, index2phoneme)
                     pred_ph = clean_phonemes(collapse_repeats(pred_ph))
 
-                    ref_frame = labels[i].detach().cpu().tolist()
+                    L_lab = int(label_lengths[i].item())
+                    ref_frame = labels[i][:L_lab].detach().cpu().tolist()
                     ref_noblank = [int(r) for r in ref_frame if int(r) != blank_index]
                     ref_seq_ids = collapse_repeats(ref_noblank)
                     ref_ph = idx_to_phonemes(ref_seq_ids, index2phoneme)
@@ -149,11 +154,9 @@ def evaluate(model, loader, index2phoneme, device, logger, stage="Validation", b
 
                     # 디버그 로그 (초기 n개)
                     if total_samples <= log_debug_n:
-                        nonzero_cnt = int((labels[i] != blank_index).sum().item())
-                        L_lab = int(label_lengths[i].item())
                         logger.info(
                             "[DBG] "
-                            f"out_T={T_out} ref_nonzero={nonzero_cnt} label_lengths={L_lab} "
+                            f"out_T={T_out} label_len={L_lab} "
                             f"ref_seq_len={len(ref_seq_ids)} pred_seq_len={len(pred_ids)} "
                             f"PER={per:.2%} | REF={' '.join(ref_ph[:40])} | PRED={' '.join(pred_ph[:40])}"
                         )
@@ -162,7 +165,7 @@ def evaluate(model, loader, index2phoneme, device, logger, stage="Validation", b
                     logger.error(f"[EVAL DECODE ERROR] Sample {i} | Error: {e}")
                     continue
                 
-    avg_per = total_per / total_samples if total_samples > 0 else 0
+    avg_per = total_per / total_samples if total_samples > 0 else 0.0
     logger.info(f"{stage} PER(label): {avg_per:.2%}")
 
     return avg_per
@@ -179,28 +182,32 @@ def main():
     args = convert_config_to_namespace("train_config.json")
 
     os.makedirs(args.model_dir, exist_ok=True)
+    os.makedirs("preprocessed", exist_ok=True)
+
     logger = setup_logger(os.path.join(args.model_dir, 'train.log'))
     logger.info("===== Training Started =====")
     logger.info(f"Epochs: {args.epochs}, LR: {args.learning_rate}, Batch: {args.batch_size}, Seed: {args.seed}")
+
+    set_seed(getattr(args, "seed", 42))
 
     with open("utils/phoneme2index.json", encoding="utf-8") as f:
         phoneme2index = json.load(f)
 
     phoneme2index = {k: int(v) for k, v in phoneme2index.items()}
     index2phoneme = {v: k for k, v in phoneme2index.items()}
+    blank_index = phoneme2index.get("<blank>", 0)
 
-    os.makedirs("preprocessed", exist_ok=True)
     train_data = load_dataset_from_s3(args.train_dataset_path)
     val_data = load_dataset_from_s3(args.val_dataset_path)
     test_data = load_dataset_from_s3(args.test_dataset_path)
 
-    train_dataset = PhonemeTensorDataset(train_data, meta_list=train_data["metas"])
-    val_dataset = PhonemeTensorDataset(val_data, meta_list=val_data["metas"])
-    test_dataset = PhonemeTensorDataset(test_data, meta_list=test_data["metas"])
+    train_dataset = PhonemeTensorDataset(train_data, meta_list=train_data.get("metas"))
+    val_dataset = PhonemeTensorDataset(val_data, meta_list=val_data.get("metas"))
+    test_dataset = PhonemeTensorDataset(test_data, meta_list=test_data.get("metas"))
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True, persistent_workers=True)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True, persistent_workers=True)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logger.info(f"CUDA available: {torch.cuda.is_available()}")
@@ -216,15 +223,15 @@ def main():
         num_encoder_layers=2,
     ).to(device)
 
-    criterion = nn.CTCLoss(blank=0, zero_infinity=True).to(device)
+    criterion = nn.CTCLoss(blank=blank_index, zero_infinity=True).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
 
     for epoch in range(args.epochs):
         logger.info(f"--- Epoch {epoch+1}/{args.epochs} ---")
-        _ = train_one_epoch(model, train_loader, criterion, optimizer, device, logger)
+        _ = train_one_epoch(model, train_loader, criterion, optimizer, device, logger, blank_index=blank_index)
 
         if (epoch + 1) % args.eval_interval == 0 or (epoch + 1) == args.epochs:
-            evaluate(model, val_loader, index2phoneme, device, logger, stage="Validation", blank_index=0)
+            evaluate(model, val_loader, index2phoneme, device, logger, stage="Validation", blank_index=blank_index)
 
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
     model_name = f"conformer_{now}.pt"
@@ -237,7 +244,7 @@ def main():
         logger.info(f"Uploaded to s3://{args.upload_bucket}/{args.upload_path}")
 
     logger.info("===== Running Final Test Evaluation =====")
-    evaluate(model, test_loader, index2phoneme, device, logger, stage="Test", blank_index=0)
+    evaluate(model, test_loader, index2phoneme, device, logger, stage="Test", blank_index=blank_index)
     logger.info("===== Training + Evaluation Completed =====")
 
 if __name__ == "__main__":
